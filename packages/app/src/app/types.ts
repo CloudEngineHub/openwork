@@ -201,6 +201,13 @@ export type McpStatusMap = Record<string, McpStatus>;
 
 export type ReloadReason = "plugins" | "skills" | "mcp" | "config";
 
+export type ReloadTrigger = {
+  type: "skill" | "plugin" | "config" | "mcp";
+  name?: string;
+  action?: "added" | "removed" | "updated";
+  path?: string;
+};
+
 export type PendingPermission = ApiPermissionRequest & {
   receivedAt: number;
 };

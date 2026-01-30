@@ -61,6 +61,7 @@ import type {
   OnboardingStep,
   PluginScope,
   ReloadReason,
+  ReloadTrigger,
   ResetOpenworkMode,
   SettingsTab,
   SkillCard,
@@ -462,7 +463,7 @@ export default function App() {
   const mountTime = Date.now();
   const [lastKnownConfigSnapshot, setLastKnownConfigSnapshot] = createSignal("");
   const [developerMode, setDeveloperMode] = createSignal(false);
-  let markReloadRequiredRef: (reason: ReloadReason) => void = () => {};
+  let markReloadRequiredRef: (reason: ReloadReason, trigger?: ReloadTrigger) => void = () => {};
   let setReloadLastFinishedAtRef: (value: number) => void = () => {};
 
   const [selectedSessionId, setSelectedSessionId] = createSignal<string | null>(
@@ -505,7 +506,7 @@ export default function App() {
     developerMode,
     setError,
     setSseConnected,
-    markReloadRequired: (reason) => markReloadRequiredRef(reason),
+    markReloadRequired: (reason, trigger) => markReloadRequiredRef(reason, trigger),
   });
 
   const {
@@ -912,7 +913,7 @@ export default function App() {
     setBusyLabel,
     setBusyStartedAt,
     setError,
-    markReloadRequired: (reason) => markReloadRequiredRef(reason),
+    markReloadRequired: (reason, trigger) => markReloadRequiredRef(reason, trigger),
     onNotionSkillInstalled: () => {
       setNotionSkillInstalled(true);
       try {
@@ -1775,6 +1776,7 @@ export default function App() {
     reloadLastTriggeredAt,
     reloadLastFinishedAt,
     setReloadLastFinishedAt,
+    reloadTrigger,
     reloadBusy,
     reloadError,
     canReloadEngine,
@@ -1807,7 +1809,10 @@ export default function App() {
     anyActiveRuns,
   } = systemState;
 
-  const markReloadRequired = (reason: ReloadReason, options?: { force?: boolean }) => {
+  const markReloadRequired = (
+    reason: ReloadReason,
+    options?: { force?: boolean; trigger?: ReloadTrigger },
+  ) => {
     if (booting() || reloadBusy()) return;
     if (!options?.force) {
       const label = busyLabel();
@@ -1824,7 +1829,46 @@ export default function App() {
       const lastFinishedAt = reloadLastFinishedAt();
       if (lastFinishedAt && now - lastFinishedAt < 2000) return;
     }
-    markReloadRequiredRaw(reason);
+    markReloadRequiredRaw(reason, options?.trigger);
+  };
+
+  const extractReloadTriggerFromPath = (reason: ReloadReason, rawPath?: string): ReloadTrigger | null => {
+    if (!rawPath) return null;
+    const normalized = rawPath.replace(/\\/g, "/");
+    const fileName = normalized.split("/").filter(Boolean).pop();
+
+    if (reason === "skills") {
+      const match = normalized.match(/\/\.opencode\/(?:skill|skills)\/([^/]+)/i);
+      return {
+        type: "skill",
+        name: match?.[1],
+        action: "updated",
+        path: rawPath,
+      };
+    }
+
+    if (reason === "plugins") {
+      return {
+        type: "plugin",
+        action: "updated",
+        path: rawPath,
+      };
+    }
+
+    if (reason === "mcp") {
+      return {
+        type: "mcp",
+        action: "updated",
+        path: rawPath,
+      };
+    }
+
+    return {
+      type: "config",
+      name: fileName,
+      action: "updated",
+      path: rawPath,
+    };
   };
 
   const [reloadToastDismissedAt, setReloadToastDismissedAt] = createSignal<number | null>(null);
@@ -1836,6 +1880,14 @@ export default function App() {
     if (!lastTriggeredAt) return true;
     if (!dismissedAt) return true;
     return dismissedAt < lastTriggeredAt;
+  });
+
+  createEffect(() => {
+    if (!developerMode()) return;
+    console.log("[ReloadToast] reloadRequired:", reloadRequired());
+    console.log("[ReloadToast] lastTriggeredAt:", reloadLastTriggeredAt());
+    console.log("[ReloadToast] dismissedAt:", reloadToastDismissedAt());
+    console.log("[ReloadToast] trigger:", reloadTrigger());
   });
 
   const reloadWarning = createMemo(() =>
@@ -1867,39 +1919,49 @@ export default function App() {
   onMount(() => {
     if (!isTauriRuntime()) return;
     let unlisten: (() => void) | null = null;
-    void listen("openwork://reload-required", async (event: TauriEvent<{ reason?: string }>) => {
-      const rawReason = event.payload?.reason;
-      const reason: ReloadReason =
-        rawReason === "plugins" ||
-        rawReason === "skills" ||
-        rawReason === "config" ||
-        rawReason === "mcp"
-          ? rawReason
-          : "config";
+    void listen(
+      "openwork://reload-required",
+      async (event: TauriEvent<{ reason?: string; path?: string }>) => {
+        const rawReason = event.payload?.reason;
+        const reason: ReloadReason =
+          rawReason === "plugins" ||
+          rawReason === "skills" ||
+          rawReason === "config" ||
+          rawReason === "mcp"
+            ? rawReason
+            : "config";
 
-      if (reason === "config") {
-        const root = workspaceStore.activeWorkspacePath().trim();
-        if (root) {
-          try {
-            const configFile = await readOpencodeConfig("project", root);
-            const nextSnapshot = getConfigSnapshot(configFile.content);
-            if (nextSnapshot === untrack(lastKnownConfigSnapshot)) {
-              // Only model (or nothing) changed. Update UI but skip reload toast.
-              const nextModel = parseDefaultModelFromConfig(configFile.content);
-              if (nextModel && !modelEquals(untrack(defaultModel), nextModel)) {
-                setDefaultModel(nextModel);
+        if (reason === "config") {
+          const root = workspaceStore.activeWorkspacePath().trim();
+          if (root) {
+            try {
+              const configFile = await readOpencodeConfig("project", root);
+              const nextSnapshot = getConfigSnapshot(configFile.content);
+              if (nextSnapshot === untrack(lastKnownConfigSnapshot)) {
+                // Only model (or nothing) changed. Update UI but skip reload toast.
+                const nextModel = parseDefaultModelFromConfig(configFile.content);
+                if (nextModel && !modelEquals(untrack(defaultModel), nextModel)) {
+                  setDefaultModel(nextModel);
+                }
+                return;
               }
-              return;
+              setLastKnownConfigSnapshot(nextSnapshot);
+            } catch {
+              // If we can't read/parse, fall back to showing the toast
             }
-            setLastKnownConfigSnapshot(nextSnapshot);
-          } catch {
-            // If we can't read/parse, fall back to showing the toast
           }
         }
-      }
 
-      markReloadRequired(reason, { force: false });
-    })
+        const trigger =
+          extractReloadTriggerFromPath(reason, event.payload?.path) ??
+          {
+            type: reason === "plugins" ? "plugin" : reason === "skills" ? "skill" : reason,
+            action: "updated",
+          };
+
+        markReloadRequired(reason, { force: false, trigger });
+      },
+    )
       .then((stop) => {
         unlisten = stop;
       })
@@ -1910,7 +1972,7 @@ export default function App() {
     });
   });
 
-  markReloadRequiredRef = (reason) => markReloadRequired(reason, { force: true });
+  markReloadRequiredRef = (reason, trigger) => markReloadRequired(reason, { force: true, trigger });
   setReloadLastFinishedAtRef = (value) => setReloadLastFinishedAt(value);
 
   const {
@@ -1929,7 +1991,6 @@ export default function App() {
     if (!isTauriRuntime()) return;
     workspaceStore.activeWorkspaceId();
     workspaceProjectDir();
-    clearReloadRequired();
     void refreshMcpServers();
   });
 
@@ -2243,7 +2304,7 @@ export default function App() {
         }
       }
 
-      markReloadRequired("mcp");
+      markReloadRequired("mcp", { trigger: { type: "mcp", name: "notion", action: "added" } });
       setNotionStatusDetail(t("settings.reload_required", currentLocale()));
       try {
         window.localStorage.setItem("openwork.notionStatus", "connecting");
@@ -2554,7 +2615,7 @@ export default function App() {
         setMcpStatus(t("mcp.reload_required_after_add", currentLocale()));
       }
 
-      markReloadRequired("mcp");
+      markReloadRequired("mcp", { trigger: { type: "mcp", name: slug, action: "added" } });
       console.log("[connectMcp] ✓ marked reload required, refreshing servers");
 
       await refreshMcpServers();
@@ -2832,7 +2893,7 @@ export default function App() {
         }
 
         if (storedNotionStatus === "connecting") {
-          markReloadRequired("mcp");
+          markReloadRequired("mcp", { trigger: { type: "mcp", name: "notion", action: "added" } });
         }
 
         await refreshMcpServers();
@@ -3017,7 +3078,9 @@ export default function App() {
           await openworkClient.patchConfig(openworkWorkspaceId, {
             opencode: { model: formatModelRef(nextModel) },
           });
-          markReloadRequired("config");
+          markReloadRequired("config", {
+            trigger: { type: "config", name: "opencode.json", action: "updated" },
+          });
           return;
         }
 
@@ -3031,7 +3094,9 @@ export default function App() {
           throw new Error(result.stderr || result.stdout || "Failed to update opencode.json");
         }
         setLastKnownConfigSnapshot(getConfigSnapshot(content));
-        markReloadRequired("config");
+        markReloadRequired("config", {
+          trigger: { type: "config", name: "opencode.json", action: "updated" },
+        });
       } catch (error) {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : safeStringify(error);
@@ -3874,6 +3939,7 @@ export default function App() {
         open={reloadToastVisible()}
         title={t("reload.toast_title", currentLocale())}
         description={t("reload.toast_description", currentLocale())}
+        trigger={reloadTrigger()}
         warning={reloadWarning()}
         blockedReason={reloadBlockedReason()}
         error={reloadError()}
