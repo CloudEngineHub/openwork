@@ -1316,7 +1316,37 @@ export default function App() {
     if (mode() !== "client") return;
     const active = workspaceStore.activeWorkspaceDisplay();
     if (active.workspaceType === "remote" && active.remoteType === "openwork") {
-      setOpenworkServerWorkspaceId(active.openworkWorkspaceId ?? null);
+      const storedId = active.openworkWorkspaceId ?? null;
+      if (storedId) {
+        setOpenworkServerWorkspaceId(storedId);
+        return;
+      }
+
+      const client = openworkServerClient();
+      if (!client || openworkServerStatus() !== "connected") {
+        setOpenworkServerWorkspaceId(null);
+        return;
+      }
+
+      let cancelled = false;
+
+      const resolveWorkspace = async () => {
+        try {
+          const response = await client.listWorkspaces();
+          if (cancelled) return;
+          const match = response.items?.[0];
+          setOpenworkServerWorkspaceId(match?.id ?? null);
+        } catch {
+          if (!cancelled) setOpenworkServerWorkspaceId(null);
+        }
+      };
+
+      void resolveWorkspace();
+
+      onCleanup(() => {
+        cancelled = true;
+      });
+
       return;
     }
     setOpenworkServerWorkspaceId(null);
@@ -1912,6 +1942,9 @@ export default function App() {
 
   loadCommandsRef = loadCommands;
 
+  const [openworkReloadCursor, setOpenworkReloadCursor] = createSignal<number | null>(null);
+  const [openworkReloadUnsupported, setOpenworkReloadUnsupported] = createSignal(false);
+
   const resolveOpenworkReloadTarget = () => {
     if (openworkServerStatus() !== "connected") return null;
     const client = openworkServerClient();
@@ -1933,8 +1966,27 @@ export default function App() {
   const reloadWorkspaceEngineFromUi = async () => {
     const target = resolveOpenworkReloadTarget();
     if (target) {
-      await target.client.reloadEngine(target.workspaceId);
-      return true;
+      try {
+        await target.client.reloadEngine(target.workspaceId);
+        return true;
+      } catch (error) {
+        if (error instanceof OpenworkServerError && error.status === 404) {
+          if (error.code === "workspace_not_found") {
+            const response = await target.client.listWorkspaces();
+            const workspaceId = response.items?.[0]?.id;
+            if (workspaceId) {
+              setOpenworkServerWorkspaceId(workspaceId);
+              await target.client.reloadEngine(workspaceId);
+              return true;
+            }
+          }
+          if (mode() === "host" && isTauriRuntime()) {
+            return workspaceStore.reloadWorkspaceEngine();
+          }
+          throw new Error("OpenWork server reload endpoint not found. Update the host to enable reloads.");
+        }
+        throw error;
+      }
     }
     if (mode() !== "host" || !isTauriRuntime()) {
       throw new Error("Reload is unavailable for this workspace.");
@@ -2035,6 +2087,74 @@ export default function App() {
     markReloadRequiredRaw(reason, options?.trigger);
   };
 
+  const openworkReloadKey = createMemo(
+    () => `${openworkServerWorkspaceId() ?? ""}|${openworkServerUrl().trim()}`,
+  );
+
+  createEffect(() => {
+    openworkReloadKey();
+    setOpenworkReloadCursor(null);
+    setOpenworkReloadUnsupported(false);
+  });
+
+  createEffect(() => {
+    if (typeof window === "undefined") return;
+    if (openworkReloadUnsupported()) return;
+    const client = openworkServerClient();
+    const workspaceId = openworkServerWorkspaceId();
+    if (!client || openworkServerStatus() !== "connected" || !workspaceId) return;
+
+    let active = true;
+    let busy = false;
+
+    const run = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const response = await client.listReloadEvents(workspaceId, {
+          since: openworkReloadCursor() ?? undefined,
+        });
+        if (!active) return;
+        const items = Array.isArray(response.items) ? response.items : [];
+        for (const entry of items) {
+          if (reloadReasons().includes(entry.reason)) {
+            markReloadRequiredRaw(entry.reason, entry.trigger);
+          } else {
+            markReloadRequired(entry.reason, { trigger: entry.trigger });
+          }
+        }
+        if (typeof response.cursor === "number") {
+          setOpenworkReloadCursor(response.cursor);
+        } else if (items.length) {
+          setOpenworkReloadCursor(items[items.length - 1].seq);
+        }
+      } catch (error) {
+        if (error instanceof OpenworkServerError && error.status === 404) {
+          if (error.code === "workspace_not_found") {
+            try {
+              const response = await client.listWorkspaces();
+              const nextWorkspaceId = response.items?.[0]?.id ?? null;
+              setOpenworkServerWorkspaceId(nextWorkspaceId);
+            } catch {
+              setOpenworkServerWorkspaceId(null);
+            }
+          } else {
+            setOpenworkReloadUnsupported(true);
+          }
+        }
+      } finally {
+        busy = false;
+      }
+    };
+
+    run();
+    const interval = window.setInterval(run, 8_000);
+    onCleanup(() => {
+      active = false;
+      window.clearInterval(interval);
+    });
+  });
+
   const extractReloadTriggerFromPath = (reason: ReloadReason, rawPath?: string): ReloadTrigger | null => {
     if (!rawPath) return null;
     const normalized = rawPath.replace(/\\/g, "/");
@@ -2102,7 +2222,7 @@ export default function App() {
   const reloadBlockedReason = createMemo(() => {
     if (!reloadRequired()) return null;
     if (!client()) return t("reload.toast_blocked_connect", currentLocale());
-    if (mode() !== "host") return t("reload.toast_blocked_host", currentLocale());
+    if (!canReloadWorkspace()) return t("reload.toast_blocked_host", currentLocale());
     if (anyActiveRuns()) return t("reload.toast_blocked_runs", currentLocale());
     return null;
   });
