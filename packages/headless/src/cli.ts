@@ -917,12 +917,16 @@ async function spawnRouterDaemon(args: ParsedArgs, dataDir: string, host: string
   const opencodeHost = readFlag(args.flags, "opencode-host") ?? process.env.OPENWRK_OPENCODE_HOST;
   const opencodePort = readFlag(args.flags, "opencode-port") ?? process.env.OPENWRK_OPENCODE_PORT;
   const opencodeWorkdir = readFlag(args.flags, "opencode-workdir") ?? process.env.OPENWRK_OPENCODE_WORKDIR;
+  const opencodeUsername = readFlag(args.flags, "opencode-username") ?? process.env.OPENWORK_OPENCODE_USERNAME;
+  const opencodePassword = readFlag(args.flags, "opencode-password") ?? process.env.OPENWORK_OPENCODE_PASSWORD;
   const corsValue = readFlag(args.flags, "cors") ?? process.env.OPENWRK_OPENCODE_CORS;
 
   if (opencodeBin) commandArgs.push("--opencode-bin", opencodeBin);
   if (opencodeHost) commandArgs.push("--opencode-host", opencodeHost);
   if (opencodePort) commandArgs.push("--opencode-port", String(opencodePort));
   if (opencodeWorkdir) commandArgs.push("--opencode-workdir", opencodeWorkdir);
+  if (opencodeUsername) commandArgs.push("--opencode-username", opencodeUsername);
+  if (opencodePassword) commandArgs.push("--opencode-password", opencodePassword);
   if (corsValue) commandArgs.push("--cors", corsValue);
 
   const child = spawn(self.command, commandArgs, {
@@ -1105,6 +1109,18 @@ async function runRouterDaemon(args: ParsedArgs) {
 
   const opencodeBin = readFlag(args.flags, "opencode-bin") ?? process.env.OPENWRK_OPENCODE_BIN ?? "opencode";
   const opencodeHost = readFlag(args.flags, "opencode-host") ?? process.env.OPENWRK_OPENCODE_HOST ?? "127.0.0.1";
+  const opencodePassword =
+    readFlag(args.flags, "opencode-password") ??
+    process.env.OPENWORK_OPENCODE_PASSWORD ??
+    process.env.OPENCODE_SERVER_PASSWORD;
+  const opencodeUsername =
+    readFlag(args.flags, "opencode-username") ??
+    process.env.OPENWORK_OPENCODE_USERNAME ??
+    process.env.OPENCODE_SERVER_USERNAME ??
+    DEFAULT_OPENCODE_USERNAME;
+  const authHeaders = opencodePassword
+    ? { Authorization: `Basic ${encodeBasicAuth(opencodeUsername, opencodePassword)}` }
+    : undefined;
   const opencodePort = await resolvePort(
     readNumber(args.flags, "opencode-port", state.opencode?.port, "OPENWRK_OPENCODE_PORT"),
     "127.0.0.1",
@@ -1122,7 +1138,11 @@ async function runRouterDaemon(args: ParsedArgs) {
   const ensureOpencode = async () => {
     const existing = state.opencode;
     if (existing && isProcessAlive(existing.pid)) {
-      const client = createOpencodeClient({ baseUrl: existing.baseUrl, directory: resolvedWorkdir });
+      const client = createOpencodeClient({
+        baseUrl: existing.baseUrl,
+        directory: resolvedWorkdir,
+        headers: authHeaders,
+      });
       try {
         await waitForOpencodeHealthy(client, 2000, 200);
         return { baseUrl: existing.baseUrl, client };
@@ -1140,13 +1160,17 @@ async function runRouterDaemon(args: ParsedArgs) {
       workspace: resolvedWorkdir,
       bindHost: opencodeHost,
       port: opencodePort,
-      username: undefined,
-      password: undefined,
+      username: opencodePassword ? opencodeUsername : undefined,
+      password: opencodePassword,
       corsOrigins: corsOrigins.length ? corsOrigins : ["*"],
     });
     opencodeChild = child;
     const baseUrl = `http://${opencodeHost}:${opencodePort}`;
-    const client = createOpencodeClient({ baseUrl, directory: resolvedWorkdir });
+    const client = createOpencodeClient({
+      baseUrl,
+      directory: resolvedWorkdir,
+      headers: authHeaders,
+    });
     await waitForOpencodeHealthy(client);
     state.opencode = {
       pid: child.pid ?? 0,
@@ -1305,6 +1329,7 @@ async function runRouterDaemon(args: ParsedArgs) {
         const client = createOpencodeClient({
           baseUrl,
           directory: directory ? directory : undefined,
+          headers: authHeaders,
         });
         const pathInfo = unwrap(await client.path.get());
         workspace.lastUsedAt = nowMs();
@@ -1328,7 +1353,7 @@ async function runRouterDaemon(args: ParsedArgs) {
         const directory = isRemote ? workspace.directory ?? "" : workspace.path;
         const response = await fetch(
           `${baseUrl.replace(/\/$/, "")}/instance/dispose?directory=${encodeURIComponent(directory)}`,
-          { method: "POST" },
+          { method: "POST", headers: authHeaders },
         );
         const ok = response.ok ? await response.json() : false;
         workspace.lastUsedAt = nowMs();
