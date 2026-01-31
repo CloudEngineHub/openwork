@@ -1878,6 +1878,36 @@ export default function App() {
 
   loadCommandsRef = loadCommands;
 
+  const resolveOpenworkReloadTarget = () => {
+    if (openworkServerStatus() !== "connected") return null;
+    const client = openworkServerClient();
+    if (!client) return null;
+    const workspaceId = openworkServerWorkspaceId();
+    if (!workspaceId) return null;
+    return { client, workspaceId };
+  };
+
+  const canReloadViaOpenworkServer = createMemo(() => Boolean(resolveOpenworkReloadTarget()));
+
+  const canReloadWorkspace = createMemo(() => {
+    if (canReloadViaOpenworkServer()) return true;
+    if (mode() !== "host") return false;
+    if (!isTauriRuntime()) return false;
+    return true;
+  });
+
+  const reloadWorkspaceEngineFromUi = async () => {
+    const target = resolveOpenworkReloadTarget();
+    if (target) {
+      await target.client.reloadEngine(target.workspaceId);
+      return true;
+    }
+    if (mode() !== "host" || !isTauriRuntime()) {
+      throw new Error("Reload is unavailable for this workspace.");
+    }
+    return workspaceStore.reloadWorkspaceEngine();
+  };
+
   const systemState = createSystemState({
     client,
     mode,
@@ -1886,7 +1916,8 @@ export default function App() {
     refreshPlugins,
     refreshSkills,
     refreshMcpServers,
-    reloadWorkspaceEngine: () => workspaceStore.reloadWorkspaceEngine(),
+    reloadWorkspaceEngine: reloadWorkspaceEngineFromUi,
+    canReloadWorkspaceEngine: () => canReloadWorkspace(),
     setProviders,
     setProviderDefaults,
     setProviderConnectedIds,
