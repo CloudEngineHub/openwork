@@ -48,8 +48,13 @@ export default function Composer(props: ComposerProps) {
   });
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    const composing =
+      event.isComposing ||
+      event.key === "Process" ||
+      (event as KeyboardEvent & { keyCode?: number }).keyCode === 229;
+    if (composing) return;
+    if (event.defaultPrevented) return;
     if (event.key === "Enter" && event.shiftKey) return;
-    if (event.isComposing && event.key !== "Enter") return;
 
     if (commandMenuOpen()) {
       const matches = props.commandMatches;

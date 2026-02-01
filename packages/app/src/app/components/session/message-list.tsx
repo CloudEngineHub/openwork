@@ -29,6 +29,7 @@ type MessageBlock = {
   kind: "message";
   message: MessageWithParts;
   renderableParts: Part[];
+  attachmentParts: Part[];
   groups: MessageGroup[];
   isUser: boolean;
   messageId: string;
@@ -98,18 +99,64 @@ export default function MessageList(props: MessageListProps) {
       return props.developerMode;
     });
 
+  const attachmentPartsForMessage = (message: MessageWithParts) =>
+    message.parts.filter((part) => part.type === "file" || part.type === "agent");
+
+  const formatAttachment = (part: Part) => {
+    if (part.type === "agent") {
+      return {
+        label: `@${part.name}`,
+        detail: "",
+      };
+    }
+
+    if (part.type === "file") {
+      const source = part.source as
+        | { type: "file"; path: string }
+        | { type: "symbol"; path: string; name: string }
+        | { type: "resource"; clientName: string; uri: string }
+        | undefined;
+      if (source?.type === "symbol") {
+        return {
+          label: source.path,
+          detail: source.name,
+        };
+      }
+      if (source?.type === "file") {
+        return {
+          label: source.path,
+          detail: "",
+        };
+      }
+      if (source?.type === "resource") {
+        return {
+          label: source.uri,
+          detail: source.clientName ? `via ${source.clientName}` : "",
+        };
+      }
+      const fallback = part.filename?.trim() || part.url?.trim() || "File";
+      return {
+        label: fallback,
+        detail: "",
+      };
+    }
+
+    return { label: "Attachment", detail: "" };
+  };
+
   const messageBlocks = createMemo<MessageBlockItem[]>(() => {
     const blocks: MessageBlockItem[] = [];
 
     for (const message of props.messages) {
       const renderableParts = renderablePartsForMessage(message);
-      if (!renderableParts.length) continue;
+      const attachmentParts = attachmentPartsForMessage(message);
+      if (!renderableParts.length && !attachmentParts.length) continue;
 
       const messageId = String((message.info as any).id ?? "");
       const groupId = String((message.info as any).id ?? "message");
       const groups = groupMessageParts(renderableParts, groupId);
       const isUser = (message.info as any).role === "user";
-      const isStepsOnly = groups.length === 1 && groups[0].kind === "steps";
+      const isStepsOnly = groups.length === 1 && groups[0].kind === "steps" && !attachmentParts.length;
 
       if (isStepsOnly) {
         const stepGroup = groups[0] as { kind: "steps"; id: string; parts: Part[] };
@@ -135,6 +182,7 @@ export default function MessageList(props: MessageListProps) {
         kind: "message",
         message,
         renderableParts,
+        attachmentParts,
         groups,
         isUser,
         messageId,
@@ -253,6 +301,31 @@ export default function MessageList(props: MessageListProps) {
                     : "max-w-[68ch] text-[15px] leading-7 text-gray-12 group pl-2"
                 }`}
               >
+                <Show when={block.attachmentParts.length}>
+                  <div class="mb-3 flex flex-wrap gap-2">
+                    <For each={block.attachmentParts}>
+                      {(part) => {
+                        const formatted = formatAttachment(part);
+                        return (
+                          <div
+                            class={`inline-flex max-w-full items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+                              block.isUser
+                                ? "border-gray-6/60 bg-gray-2/50 text-gray-11"
+                                : "border-gray-6/70 bg-gray-2/40 text-gray-11"
+                            }`}
+                          >
+                            <span class="truncate font-mono">{formatted.label}</span>
+                            <Show when={formatted.detail}>
+                              {(detail) => (
+                                <span class="text-gray-9 truncate">{detail()}</span>
+                              )}
+                            </Show>
+                          </div>
+                        );
+                      }}
+                    </For>
+                  </div>
+                </Show>
                 <For each={block.groups}>
                   {(group, idx) => (
                     <div class={idx() === block.groups.length - 1 ? "" : groupSpacing}>
