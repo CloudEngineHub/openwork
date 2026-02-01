@@ -712,9 +712,6 @@ export default function App() {
     setError(null);
 
     try {
-      setLastPromptSent(content);
-      setPrompt("");
-
       const model = selectedSessionModel();
       const agent = selectedSessionAgent();
       const parts = buildPromptParts(resolvedDraft);
@@ -743,6 +740,9 @@ export default function App() {
           parts,
         });
 
+        setLastPromptSent(content);
+        setPrompt("");
+
         setSessionModelById((current) => ({
           ...current,
           [sessionID]: model,
@@ -762,6 +762,7 @@ export default function App() {
     } catch (e) {
       const message = e instanceof Error ? e.message : safeStringify(e);
       setError(addOpencodeCacheHint(message));
+      setPrompt(content);
     } finally {
       setBusy(false);
       setBusyLabel(null);

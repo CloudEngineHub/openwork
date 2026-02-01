@@ -610,13 +610,18 @@ export default function Composer(props: ComposerProps) {
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    const composing =
+      event.isComposing ||
+      event.key === "Process" ||
+      (event as KeyboardEvent & { keyCode?: number }).keyCode === 229;
+    if (composing) return;
+    if (event.defaultPrevented) return;
     if (event.key === "Enter" && event.shiftKey) {
       event.preventDefault();
       document.execCommand("insertLineBreak");
       emitDraftChange();
       return;
     }
-    if (event.isComposing && event.key !== "Enter") return;
 
     if (mentionOpen()) {
       const options = mentionOptions();
