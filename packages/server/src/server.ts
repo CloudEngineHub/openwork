@@ -47,6 +47,7 @@ export function startServer(config: ServerConfig) {
   const server = Bun.serve({
     hostname: config.host,
     port: config.port,
+    idleTimeout: 120, // Allow long-running operations like engine reload
     fetch: async (request: Request) => {
       const url = new URL(request.url);
       if (request.method === "OPTIONS") {
