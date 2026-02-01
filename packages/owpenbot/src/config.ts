@@ -184,7 +184,8 @@ export function loadConfig(
 ): Config {
   const requireOpencode = options.requireOpencode ?? false;
 
-  const dataDir = expandHome(env.OWPENBOT_DATA_DIR ?? "~/.owpenbot");
+  const defaultDataDir = path.join(os.homedir(), ".openwork", "owpenbot");
+  const dataDir = expandHome(env.OWPENBOT_DATA_DIR ?? defaultDataDir);
   const dbPath = expandHome(env.OWPENBOT_DB_PATH ?? path.join(dataDir, "owpenbot.db"));
   const logFile = expandHome(env.OWPENBOT_LOG_FILE ?? path.join(dataDir, "logs", "owpenbot.log"));
   const configPath = resolveConfigPath(dataDir, env);
