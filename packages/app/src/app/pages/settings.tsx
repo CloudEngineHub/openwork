@@ -111,7 +111,7 @@ export type SettingsViewProps = {
 };
 
 // Owpenbot Settings Component
-function OwpenbotSettings(props: { busy: boolean }) {
+function OwpenbotSettings(props: { busy: boolean; mode: "host" | "client" | null }) {
   const [owpenbotStatus, setOwpenbotStatus] = createSignal<OwpenbotStatus | null>(null);
   const [qrCode, setQrCode] = createSignal<string | null>(null);
   const [qrLoading, setQrLoading] = createSignal(false);
@@ -127,6 +127,12 @@ function OwpenbotSettings(props: { busy: boolean }) {
   >("idle");
   const [telegramCheckMessage, setTelegramCheckMessage] = createSignal<string | null>(null);
   const [telegramCheckDetail, setTelegramCheckDetail] = createSignal<string | null>(null);
+  const canUseOwpenbot = createMemo(() => isTauriRuntime() && props.mode === "host");
+  const owpenbotUnavailableMessage = createMemo(() => {
+    if (!isTauriRuntime()) return "Messaging bridge settings require the desktop app.";
+    if (props.mode !== "host") return "Switch to host mode to configure Telegram and WhatsApp.";
+    return null;
+  });
 
   // Load owpenbot status on mount
   onMount(async () => {
@@ -242,6 +248,13 @@ function OwpenbotSettings(props: { busy: boolean }) {
   const handleSaveTelegramToken = async () => {
     const token = telegramToken().trim();
     if (!token || savingTelegram()) return;
+    if (!canUseOwpenbot()) {
+      const detail = !isTauriRuntime()
+        ? "Use the desktop app to configure Telegram."
+        : "Switch to host mode to update Telegram.";
+      setTelegramFeedback("warning", "Telegram settings are unavailable.", detail);
+      return;
+    }
 
     setSavingTelegram(true);
     setTelegramFeedback("checking", "Saving token and verifying Telegram...");
@@ -360,6 +373,12 @@ function OwpenbotSettings(props: { busy: boolean }) {
         </div>
       </div>
 
+      <Show when={owpenbotUnavailableMessage()}>
+        <div class="text-[11px] text-gray-9 bg-gray-1/60 border border-gray-6/50 rounded-lg px-3 py-2">
+          {owpenbotUnavailableMessage()}
+        </div>
+      </Show>
+
       {/* Telegram Section */}
       <div class="bg-gray-1 rounded-xl border border-gray-6 p-4 space-y-4">
         <div class="flex items-center justify-between">
@@ -389,12 +408,13 @@ function OwpenbotSettings(props: { busy: boolean }) {
                 }}
                 placeholder="Paste token from @BotFather"
                 class="flex-1 rounded-lg bg-gray-2/60 px-3 py-2 text-sm text-gray-12 placeholder:text-gray-10 shadow-[0_0_0_1px_rgba(255,255,255,0.08)] focus:outline-none focus:ring-2 focus:ring-gray-6/20"
-                disabled={props.busy || savingTelegram()}
+                disabled={props.busy || savingTelegram() || !canUseOwpenbot()}
               />
               <Button
                 variant="outline"
                 class="text-xs h-9 px-3 shrink-0"
                 onClick={() => setTelegramTokenVisible((prev) => !prev)}
+                disabled={props.busy || !canUseOwpenbot()}
               >
                 {telegramTokenVisible() ? "Hide" : "Show"}
               </Button>
@@ -403,7 +423,7 @@ function OwpenbotSettings(props: { busy: boolean }) {
               variant="secondary"
               class="text-xs h-9 px-3"
               onClick={handleSaveTelegramToken}
-              disabled={props.busy || savingTelegram() || !telegramToken().trim()}
+              disabled={props.busy || savingTelegram() || !telegramToken().trim() || !canUseOwpenbot()}
             >
               {savingTelegram() ? "Saving..." : "Save"}
             </Button>
@@ -461,7 +481,7 @@ function OwpenbotSettings(props: { busy: boolean }) {
                   variant="secondary"
                   class="w-full"
                   onClick={showQrCode}
-                  disabled={props.busy || qrLoading()}
+                  disabled={props.busy || qrLoading() || !canUseOwpenbot()}
                 >
                   {qrLoading() ? "Loading QR..." : "Show QR Code to Link"}
                 </Button>
@@ -502,7 +522,7 @@ function OwpenbotSettings(props: { busy: boolean }) {
                       : "bg-gray-2/60 border border-gray-6/50 hover:bg-gray-3"
                   }`}
                   onClick={() => handleDmPolicyChange(option.value)}
-                  disabled={props.busy || savingPolicy()}
+                  disabled={props.busy || savingPolicy() || !canUseOwpenbot()}
                 >
                   <div class="text-xs font-medium text-gray-12">{option.label}</div>
                   <div class="text-[11px] text-gray-10">{option.description}</div>
@@ -523,13 +543,13 @@ function OwpenbotSettings(props: { busy: boolean }) {
                 onInput={(e) => setNewAllowlistEntry(e.currentTarget.value)}
                 placeholder="+1234567890"
                 class="flex-1 rounded-lg bg-gray-2/60 px-3 py-2 text-sm text-gray-12 placeholder:text-gray-10 shadow-[0_0_0_1px_rgba(255,255,255,0.08)] focus:outline-none focus:ring-2 focus:ring-gray-6/20"
-                disabled={props.busy || savingAllowlist()}
+                disabled={props.busy || savingAllowlist() || !canUseOwpenbot()}
               />
               <Button
                 variant="secondary"
                 class="text-xs h-9 px-3"
                 onClick={handleAddAllowlistEntry}
-                disabled={props.busy || savingAllowlist() || !newAllowlistEntry().trim()}
+                disabled={props.busy || savingAllowlist() || !newAllowlistEntry().trim() || !canUseOwpenbot()}
               >
                 Add
               </Button>
@@ -543,7 +563,7 @@ function OwpenbotSettings(props: { busy: boolean }) {
                       <button
                         class="p-0.5 rounded hover:bg-gray-4"
                         onClick={() => handleRemoveAllowlistEntry(entry)}
-                        disabled={props.busy || savingAllowlist()}
+                        disabled={props.busy || savingAllowlist() || !canUseOwpenbot()}
                       >
                         <X size={12} class="text-gray-10" />
                       </button>
@@ -578,7 +598,7 @@ function OwpenbotSettings(props: { busy: boolean }) {
                       variant="secondary"
                       class="text-xs h-8 py-0 px-3"
                       onClick={() => handleApprovePairing(request.code)}
-                      disabled={props.busy}
+                      disabled={props.busy || !canUseOwpenbot()}
                     >
                       Approve
                     </Button>
@@ -586,7 +606,7 @@ function OwpenbotSettings(props: { busy: boolean }) {
                       variant="ghost"
                       class="text-xs h-8 py-0 px-3"
                       onClick={() => handleDenyPairing(request.code)}
-                      disabled={props.busy}
+                      disabled={props.busy || !canUseOwpenbot()}
                     >
                       Deny
                     </Button>
@@ -1643,7 +1663,7 @@ export default function SettingsView(props: SettingsViewProps) {
 
         <Match when={activeTab() === "messaging"}>
           <div class="space-y-6">
-            <OwpenbotSettings busy={props.busy} />
+            <OwpenbotSettings busy={props.busy} mode={props.mode} />
           </div>
         </Match>
 

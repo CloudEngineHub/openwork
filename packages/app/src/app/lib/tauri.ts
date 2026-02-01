@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { validateMcpServerName } from "../mcp";
+import { isTauriRuntime } from "../utils";
 
 export type EngineInfo = {
   running: boolean;
@@ -622,9 +623,41 @@ export async function setOwpenbotAllowlist(allowlist: string[]): Promise<ExecRes
 }
 
 export async function setOwpenbotTelegramToken(token: string): Promise<ExecResult> {
+  if (!isTauriRuntime()) {
+    return {
+      ok: false,
+      status: 1,
+      stdout: "",
+      stderr: "Telegram configuration requires the desktop app.",
+    };
+  }
   try {
     const status = await getOwpenbotStatus();
-    const healthPort = status?.healthPort ?? 3005;
+    if (!status) {
+      return {
+        ok: false,
+        status: 1,
+        stdout: "",
+        stderr: "Owpenbot status is unavailable. Start OpenWork in host mode.",
+      };
+    }
+    if (!status.running) {
+      return {
+        ok: false,
+        status: 1,
+        stdout: "",
+        stderr: "Messaging bridge is offline. Start OpenWork to enable owpenbot.",
+      };
+    }
+    if (!status.healthPort) {
+      return {
+        ok: false,
+        status: 1,
+        stdout: "",
+        stderr: "Owpenbot health port is unavailable.",
+      };
+    }
+    const healthPort = status.healthPort;
     const response = await fetch(`http://127.0.0.1:${healthPort}/config/telegram-token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
