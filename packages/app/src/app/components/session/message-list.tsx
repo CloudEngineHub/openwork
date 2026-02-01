@@ -183,46 +183,60 @@ export default function MessageList(props: MessageListProps) {
     return blocks;
   });
 
-  const StepsList = (listProps: { parts: Part[]; isUser: boolean }) => (
-    <div class="space-y-3">
-      <For each={listProps.parts}>
-        {(part) => {
-          const summary = summarizeStep(part);
-          return (
-            <div class="flex items-start gap-3 text-xs text-gray-11">
-              <div class={`mt-0.5 h-5 w-5 rounded-full border flex items-center justify-center ${
-                summary.isSkill 
-                  ? "border-purple-7 bg-purple-3 text-purple-10" 
-                  : "border-gray-7 text-gray-10"
-              }`}>
-                {summary.isSkill ? <Sparkles size={12} /> : part.type === "tool" ? <File size={12} /> : <Circle size={8} />}
-              </div>
-              <div class="flex-1">
-                <div class="flex items-center gap-2">
-                  <span class="text-gray-12">{summary.title}</span>
-                  <Show when={summary.isSkill}>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                      skill
-                    </span>
-                  </Show>
-                </div>
-                <Show when={summary.detail}>
-                  <div class="mt-1 text-gray-10">{summary.detail}</div>
-                </Show>
-                <Show when={props.developerMode && (part.type !== "tool" || props.showThinking)}>
-                  <div class="mt-2 text-xs text-gray-10">
-                    <PartView
-                      part={part}
-                      developerMode={props.developerMode}
-                      showThinking={props.showThinking}
-                      tone={listProps.isUser ? "dark" : "light"}
-                    />
-                  </div>
-                </Show>
-              </div>
+  const StepItem = (stepProps: { part: Part; isUser: boolean; isLast: boolean }) => {
+    const summary = summarizeStep(stepProps.part);
+    return (
+      <div class={`flex items-start gap-3 pl-4 ${stepProps.isLast ? "" : "pb-3"}`}>
+        {/* Vertical line connector */}
+        <div class="relative flex flex-col items-center">
+          <div class={`h-5 w-5 rounded-full border flex items-center justify-center shrink-0 ${
+            summary.isSkill 
+              ? "border-purple-7 bg-purple-3 text-purple-10" 
+              : "border-gray-7 bg-gray-2 text-gray-11"
+          }`}>
+            {summary.isSkill ? <Sparkles size={12} /> : stepProps.part.type === "tool" ? <File size={12} /> : <Circle size={8} />}
+          </div>
+          <Show when={!stepProps.isLast}>
+            <div class="w-px bg-gray-6 flex-1 min-h-[12px]" />
+          </Show>
+        </div>
+        <div class="flex-1 min-w-0 pt-0.5">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-sm font-medium text-gray-12">{summary.title}</span>
+            <Show when={summary.isSkill}>
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                skill
+              </span>
+            </Show>
+          </div>
+          <Show when={summary.detail}>
+            <div class="mt-1 text-xs text-gray-11 break-words">{summary.detail}</div>
+          </Show>
+          <Show when={props.developerMode && (stepProps.part.type !== "tool" || props.showThinking)}>
+            <div class="mt-2 text-xs text-gray-11">
+              <PartView
+                part={stepProps.part}
+                developerMode={props.developerMode}
+                showThinking={props.showThinking}
+                tone={stepProps.isUser ? "dark" : "light"}
+              />
             </div>
-          );
-        }}
+          </Show>
+        </div>
+      </div>
+    );
+  };
+
+  const StepsList = (listProps: { parts: Part[]; isUser: boolean }) => (
+    <div class="mt-2">
+      <For each={listProps.parts}>
+        {(part, index) => (
+          <StepItem 
+            part={part} 
+            isUser={listProps.isUser} 
+            isLast={index() === listProps.parts.length - 1} 
+          />
+        )}
       </For>
     </div>
   );
@@ -261,20 +275,14 @@ export default function MessageList(props: MessageListProps) {
                       />
                     </button>
                     <Show when={expanded()}>
-                      <div
-                        class={`mt-3 rounded-xl border p-3 max-h-96 overflow-auto ${
-                          block.isUser
-                            ? "border-gray-6 bg-gray-1/60"
-                            : "border-gray-6/70 bg-gray-2/40"
-                        }`}
-                      >
+                      <div class="mt-2">
                         <For each={block.partsGroups}>
                           {(parts, index) => (
                             <div
                               class={
                                 index() === 0
                                   ? ""
-                                  : "mt-3 pt-3 border-t border-gray-6/60"
+                                  : "mt-2 pt-2 border-t border-gray-6/40"
                               }
                             >
                               <StepsList parts={parts} isUser={block.isUser} />
@@ -362,15 +370,7 @@ export default function MessageList(props: MessageListProps) {
                                 />
                               </button>
                               <Show when={expanded()}>
-                                <div
-                                  class={`mt-3 rounded-xl border p-3 max-h-96 overflow-auto ${
-                                    block.isUser
-                                      ? "border-gray-6 bg-gray-1/60"
-                                      : "border-gray-6/70 bg-gray-2/40"
-                                  }`}
-                                >
-                                  <StepsList parts={stepGroup.parts} isUser={block.isUser} />
-                                </div>
+                                <StepsList parts={stepGroup.parts} isUser={block.isUser} />
                               </Show>
                             </div>
                           );

@@ -538,10 +538,10 @@ export default function PartView(props: Props) {
       </Match>
 
       <Match when={p().type === "step-start" || p().type === "step-finish"}>
-        <div class={`text-xs ${subtleTextClass()}`.trim()}>
+        <div class="text-xs text-gray-12">
           {p().type === "step-start" ? "Step started" : "Step finished"}
           <Show when={"reason" in p() && (p() as any).reason}>
-            <span class={tone() === "dark" ? "text-gray-12/80" : "text-gray-11"}>
+            <span class="text-gray-11">
               {" "}· {String((p() as any).reason)}
             </span>
           </Show>
