@@ -227,10 +227,6 @@ export function createSystemState(options: {
       setReloadError("Reload is unavailable for this workspace.");
       return;
     }
-    if (override === false) {
-      setReloadError("Reload is unavailable for this workspace.");
-      return;
-    }
 
     // if (anyActiveRuns()) {
     //   setReloadError("Waiting for active tasks to complete before reloading.");

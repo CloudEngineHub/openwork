@@ -231,8 +231,13 @@ export function createWorkspaceStore(options: {
 
     const opencodeUsername = workspace.opencode?.username?.trim() ?? "";
     const opencodePassword = workspace.opencode?.password?.trim() ?? "";
-    const opencodeAuth =
+    let opencodeAuth: OpencodeAuth | undefined =
       opencodeUsername && opencodePassword ? { username: opencodeUsername, password: opencodePassword } : undefined;
+
+    if (!isTauriRuntime()) {
+      opencodeBaseUrl = `${normalized.replace(/\/+$/, "")}/opencode`;
+      opencodeAuth = trimmedToken ? { token: trimmedToken, mode: "openwork" } : undefined;
+    }
 
     try {
       const hostUrl = new URL(normalized);

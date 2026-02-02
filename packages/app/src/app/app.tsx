@@ -1493,7 +1493,20 @@ export default function App() {
     setOpenworkServerStatus(result.status);
     setOpenworkServerCapabilities(result.capabilities);
     setOpenworkServerCheckedAt(Date.now());
-    return result.status === "connected" || result.status === "limited";
+    const ok = result.status === "connected" || result.status === "limited";
+    if (ok && !isTauriRuntime()) {
+      const active = workspaceStore.activeWorkspaceDisplay();
+      const shouldAttach = !client() || active.workspaceType !== "remote" || active.remoteType !== "openwork";
+      if (shouldAttach) {
+        await workspaceStore
+          .createRemoteWorkspaceFlow({
+            openworkHostUrl: derived,
+            openworkToken: next.token ?? null,
+          })
+          .catch(() => undefined);
+      }
+    }
+    return ok;
   };
 
   const commandState = createCommandState({
@@ -3489,7 +3502,7 @@ export default function App() {
 
   createEffect(() => {
     if (!isTauriRuntime()) return;
-    if (onboardingStep() !== "host") return;
+    if (onboardingStep() !== "local") return;
     void workspaceStore.refreshEngineDoctor();
   });
 
