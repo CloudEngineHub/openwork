@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import type { Agent, Part } from "@opencode-ai/sdk/v2/client";
 import type {
   ArtifactItem,
@@ -130,38 +130,7 @@ export type SessionViewProps = {
   deleteSession: (sessionId: string) => Promise<void>;
 };
 
-type SessionWorkspaceMap = Record<string, string[]>;
 type SessionSummary = { id: string; title: string; slug?: string | null };
-
-const SESSION_WORKSPACE_STORE_KEY = "openwork.session-workspaces.v1";
-
-const readSessionWorkspaceMap = (): SessionWorkspaceMap => {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(SESSION_WORKSPACE_STORE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    return parsed as SessionWorkspaceMap;
-  } catch {
-    return {};
-  }
-};
-
-const writeSessionWorkspaceMap = (map: SessionWorkspaceMap) => {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(SESSION_WORKSPACE_STORE_KEY, JSON.stringify(map));
-  } catch {
-    // ignore
-  }
-};
-
-const normalizeWorkspaceIds = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
-
-const arraysEqual = (a: string[], b: string[]) =>
-  a.length === b.length && a.every((value, index) => value === b[index]);
 
 export default function SessionView(props: SessionViewProps) {
   let messagesEndEl: HTMLDivElement | undefined;
@@ -178,7 +147,6 @@ export default function SessionView(props: SessionViewProps) {
   const [agentPickerBusy, setAgentPickerBusy] = createSignal(false);
   const [agentPickerReady, setAgentPickerReady] = createSignal(false);
   const [agentPickerError, setAgentPickerError] = createSignal<string | null>(null);
-  const [sessionWorkspaceIds, setSessionWorkspaceIds] = createSignal<string[]>([]);
   const [sessionsByWorkspaceId, setSessionsByWorkspaceId] = createSignal<Record<string, SessionSummary[]>>({});
   const [agentOptions, setAgentOptions] = createSignal<Agent[]>([]);
   const [autoScrollEnabled, setAutoScrollEnabled] = createSignal(false);
@@ -188,41 +156,6 @@ export default function SessionView(props: SessionViewProps) {
   const COMMAND_ARGS_RE = /\$(ARGUMENTS|\d+)/i;
 
   const commandNeedsDetails = (command: { template: string }) => COMMAND_ARGS_RE.test(command.template);
-
-  const loadSessionWorkspaces = (sessionId: string) => {
-    const map = readSessionWorkspaceMap();
-    const stored = normalizeWorkspaceIds(map[sessionId]);
-    const knownIds = new Set(props.workspaces.map((workspace) => workspace.id));
-    return stored.filter((id) => knownIds.has(id));
-  };
-
-  const persistSessionWorkspaces = (sessionId: string, ids: string[]) => {
-    const map = readSessionWorkspaceMap();
-    if (ids.length) {
-      map[sessionId] = ids;
-    } else {
-      delete map[sessionId];
-    }
-    writeSessionWorkspaceMap(map);
-  };
-
-  const updateSessionWorkspaces = (sessionId: string, updater: (current: string[]) => string[]) => {
-    const current = untrack(sessionWorkspaceIds);
-    const next = updater(current);
-    if (arraysEqual(current, next)) return;
-    setSessionWorkspaceIds(next);
-    persistSessionWorkspaces(sessionId, next);
-  };
-
-  const rememberWorkspaceForSession = (sessionId: string, workspaceId: string) => {
-    const knownIds = new Set(untrack(() => props.workspaces).map((workspace) => workspace.id));
-    if (!knownIds.has(workspaceId)) return;
-    updateSessionWorkspaces(sessionId, (current) => {
-      const filtered = current.filter((id) => knownIds.has(id));
-      if (filtered.includes(workspaceId)) return filtered;
-      return [...filtered, workspaceId];
-    });
-  };
 
   const agentLabel = createMemo(() => props.selectedSessionAgent ?? "Default agent");
 
@@ -688,17 +621,17 @@ export default function SessionView(props: SessionViewProps) {
     return props.sessions.find((session) => session.id === id)?.title ?? "";
   });
 
-  const sessionWorkspaces = createMemo(() => {
-    const byId = new Map(props.workspaces.map((workspace) => [workspace.id, workspace]));
-    const ids = sessionWorkspaceIds();
-    const list = ids
-      .map((id) => byId.get(id))
-      .filter((workspace): workspace is WorkspaceInfo => Boolean(workspace));
-    if (list.length) return list;
+  const sortedWorkspaces = createMemo(() => {
     const activeId = props.activeWorkspaceId;
-    if (!activeId) return list;
-    const active = byId.get(activeId);
-    return active ? [active] : list;
+    return props.workspaces
+      .slice()
+      .sort((a, b) => {
+        if (a.id === activeId) return -1;
+        if (b.id === activeId) return 1;
+        const aLabel = (a.displayName ?? a.openworkWorkspaceName ?? a.name ?? "").toLowerCase();
+        const bLabel = (b.displayName ?? b.openworkWorkspaceName ?? b.name ?? "").toLowerCase();
+        return aLabel.localeCompare(bLabel);
+      });
   });
 
   createEffect(() => {
@@ -717,42 +650,11 @@ export default function SessionView(props: SessionViewProps) {
 
   const sessionWorkspaceGroups = createMemo(() => {
     const byWorkspace = sessionsByWorkspaceId();
-    return sessionWorkspaces().map((workspace) => ({
+    return sortedWorkspaces().map((workspace) => ({
       workspace,
       sessions: byWorkspace[workspace.id] ?? [],
     }));
   });
-
-  createEffect(
-    on(
-      () => props.selectedSessionId,
-      (sessionId) => {
-        if (!sessionId) {
-          setSessionWorkspaceIds([]);
-          return;
-        }
-        const next = loadSessionWorkspaces(sessionId);
-        setSessionWorkspaceIds(next);
-      },
-    ),
-  );
-
-  createEffect(() => {
-    const sessionId = props.selectedSessionId;
-    if (!sessionId) return;
-    const knownIds = new Set(props.workspaces.map((workspace) => workspace.id));
-    updateSessionWorkspaces(sessionId, (current) => current.filter((id) => knownIds.has(id)));
-  });
-
-  createEffect(
-    on(
-      [() => props.selectedSessionId, () => props.activeWorkspaceId],
-      ([sessionId, workspaceId]) => {
-        if (!sessionId || !workspaceId) return;
-        rememberWorkspaceForSession(sessionId, workspaceId);
-      },
-    ),
-  );
 
   const pickFallbackSessionId = (targetId: string) => {
     const list = props.sessions.map((session) => session.id);
