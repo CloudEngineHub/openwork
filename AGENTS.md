@@ -1,14 +1,20 @@
 # AGENTS.md
 
-OpenWork is an open-source alternative to Claude Cowork.
+OpenWork gives AI agents the tools your team already uses and lets them learn from your behavior. The more you use OpenWork, the more connected your tools become, the more knowledge accumulates, and the bigger the chunks of work you can automate.
 
 Read INFRASTRUCTURE.md
 
 ## Why OpenWork Exists
 
-**Cowork is closed-source and locked to Claude Max.** We need an open alternative.
-**Mobile-first matters.** People want to run tasks from their phones, including via messaging surfaces like WhatsApp and Telegram through owpenbot.
-**Slick UI is non-negotiable.** The experience must feel premium, not utilitarian.
+OpenWork is the simplest interface to OpenCode. Double-click, pick a folder, and you get three things instantly:
+
+- Zero-friction setup: your existing OpenCode configuration just works, no migration needed.
+- Chat access: WhatsApp and Telegram are ready to go (one token, done).
+- Cloud-ready: every app doubles as a client; deploy to the cloud and access from anywhere.
+
+It is the easiest way to create safe agentic workflows and share them with your team. OpenWork is built on top of OpenCode and turns your OpenCode config into usable experiences for non-technical users.
+
+OpenWork is an extensible, open-source alternative to Claude Work.
 
 ## Agent Guidelines for development
 
