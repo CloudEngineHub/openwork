@@ -1,7 +1,8 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import { Check, ChevronDown, Plus } from "lucide-solid";
+import { Check, ChevronDown, Loader2, Plus } from "lucide-solid";
 
 import type { TodoItem } from "../../types";
+import type { WorkspaceInfo } from "../../lib/tauri";
 
 export type SidebarSectionState = {
   progress: boolean;
@@ -18,6 +19,11 @@ export type SidebarProps = {
   expandedSections: SidebarSectionState;
   onToggleSection: (section: keyof SidebarSectionState) => void;
   workspaceName: string;
+  sessionWorkspaces: WorkspaceInfo[];
+  activeWorkspaceId: string;
+  connectingWorkspaceId?: string | null;
+  onSelectWorkspace: (workspaceId: string) => void;
+  onAddWorkspace: () => void;
   sessions: Array<{ id: string; title: string; slug?: string | null }>;
   selectedSessionId: string | null;
   onSelectSession: (id: string) => void;
@@ -29,6 +35,33 @@ export type SidebarProps = {
 
 export default function SessionSidebar(props: SidebarProps) {
   const realTodos = createMemo(() => props.todos.filter((todo) => todo.content.trim()));
+
+  const workspaceLabel = (workspace: WorkspaceInfo) =>
+    workspace.displayName?.trim() ||
+    workspace.openworkWorkspaceName?.trim() ||
+    workspace.name?.trim() ||
+    workspace.path?.trim() ||
+    "Workspace";
+
+  const workspacePathLabel = (workspace: WorkspaceInfo) => {
+    if (workspace.workspaceType === "remote") {
+      if (workspace.remoteType === "openwork") {
+        return (
+          workspace.openworkHostUrl?.trim() ||
+          workspace.baseUrl?.trim() ||
+          workspace.path?.trim() ||
+          ""
+        );
+      }
+      return workspace.baseUrl?.trim() || workspace.path?.trim() || "";
+    }
+    return workspace.path?.trim() || "";
+  };
+
+  const workspaceDetailLabel = (workspace: WorkspaceInfo) => {
+    if (workspace.workspaceType !== "remote") return "";
+    return workspace.openworkWorkspaceName?.trim() || workspace.directory?.trim() || "";
+  };
 
   const progressDots = createMemo(() => {
     const activeTodos = realTodos();
@@ -94,7 +127,89 @@ export default function SessionSidebar(props: SidebarProps) {
 
       <div class="flex-1 overflow-y-auto px-4 py-4 space-y-6">
         <div>
-          <div class="text-xs text-gray-10 font-semibold mb-3 px-2 truncate">{props.workspaceName}</div>
+          <div class="flex items-center justify-between px-2 mb-2">
+            <div class="text-xs text-gray-10 font-semibold uppercase tracking-wider">Session Workspaces</div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 text-[11px] text-gray-9 hover:text-gray-12 transition-colors"
+              onClick={props.onAddWorkspace}
+            >
+              <Plus size={12} />
+              Add
+            </button>
+          </div>
+          <div class="space-y-1">
+            <Show
+              when={props.sessionWorkspaces.length > 0}
+              fallback={
+                <div class="px-3 py-2 rounded-lg border border-dashed border-gray-6 text-xs text-gray-9">
+                  No workspaces in this session yet. Add one to get started.
+                </div>
+              }
+            >
+              <For each={props.sessionWorkspaces}>
+                {(workspace) => {
+                  const isActive = () => props.activeWorkspaceId === workspace.id;
+                  const isConnecting = () => props.connectingWorkspaceId === workspace.id;
+                  const pathLabel = () => workspacePathLabel(workspace);
+                  const detailLabel = () => workspaceDetailLabel(workspace);
+
+                  return (
+                    <button
+                      type="button"
+                      class={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
+                        isActive()
+                          ? "border-indigo-7/40 bg-indigo-2/30 text-gray-12"
+                          : "border-transparent text-gray-11 hover:text-gray-12 hover:bg-gray-2"
+                      } ${isConnecting() ? "opacity-70" : ""}`.trim()}
+                      onClick={() => {
+                        if (isActive() || isConnecting()) return;
+                        props.onSelectWorkspace(workspace.id);
+                      }}
+                      disabled={isActive() || isConnecting()}
+                    >
+                      <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0 space-y-0.5">
+                          <div class="flex items-center gap-2">
+                            <span class="text-xs font-medium truncate">
+                              {workspaceLabel(workspace)}
+                            </span>
+                            <Show when={workspace.workspaceType === "remote"}>
+                              <span class="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-gray-3 text-gray-11">
+                                Remote
+                              </span>
+                            </Show>
+                          </div>
+                          <Show when={pathLabel()}>
+                            <div class="text-[10px] text-gray-9 font-mono truncate">{pathLabel()}</div>
+                          </Show>
+                          <Show when={detailLabel() && detailLabel() !== pathLabel()}>
+                            <div class="text-[10px] text-gray-8 truncate">{detailLabel()}</div>
+                          </Show>
+                        </div>
+                        <div class="flex items-center gap-2 text-[10px] shrink-0">
+                          <Show when={isConnecting()}>
+                            <Loader2 size={12} class="text-gray-10 animate-spin" />
+                          </Show>
+                          <Show when={!isConnecting()}>
+                            <Show when={isActive()} fallback={<span class="text-gray-9">Switch</span>}>
+                              <span class="text-green-11 font-medium">Active</span>
+                            </Show>
+                          </Show>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                }}
+              </For>
+            </Show>
+          </div>
+        </div>
+
+        <div>
+          <div class="text-xs text-gray-10 font-semibold mb-3 px-2 truncate">
+            Sessions · {props.workspaceName}
+          </div>
           <div class="space-y-1">
             <Show
               when={props.sessions.length > 0}
