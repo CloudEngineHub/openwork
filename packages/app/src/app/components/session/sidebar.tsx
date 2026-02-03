@@ -4,6 +4,17 @@ import { Check, ChevronDown, Loader2, Plus } from "lucide-solid";
 import type { TodoItem } from "../../types";
 import type { WorkspaceInfo } from "../../lib/tauri";
 
+type SessionSummary = {
+  id: string;
+  title: string;
+  slug?: string | null;
+};
+
+type WorkspaceSessionGroup = {
+  workspace: WorkspaceInfo;
+  sessions: SessionSummary[];
+};
+
 export type SidebarSectionState = {
   progress: boolean;
   artifacts: boolean;
@@ -18,15 +29,13 @@ export type SidebarProps = {
   todos: TodoItem[];
   expandedSections: SidebarSectionState;
   onToggleSection: (section: keyof SidebarSectionState) => void;
-  workspaceName: string;
-  sessionWorkspaces: WorkspaceInfo[];
+  workspaceGroups: WorkspaceSessionGroup[];
   activeWorkspaceId: string;
   connectingWorkspaceId?: string | null;
   onSelectWorkspace: (workspaceId: string) => void;
   onAddWorkspace: () => void;
-  sessions: Array<{ id: string; title: string; slug?: string | null }>;
+  onSelectSession: (workspaceId: string, sessionId: string) => void;
   selectedSessionId: string | null;
-  onSelectSession: (id: string) => void;
   sessionStatusById: Record<string, string>;
   onCreateSession: () => void;
   onDeleteSession: (id: string) => void;
@@ -128,137 +137,143 @@ export default function SessionSidebar(props: SidebarProps) {
       <div class="flex-1 overflow-y-auto px-4 py-4 space-y-6">
         <div>
           <div class="flex items-center justify-between px-2 mb-2">
-            <div class="text-xs text-gray-10 font-semibold uppercase tracking-wider">Session Workspaces</div>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 text-[11px] text-gray-9 hover:text-gray-12 transition-colors"
-              onClick={props.onAddWorkspace}
-            >
-              <Plus size={12} />
-              Add
-            </button>
+            <div class="text-xs text-gray-10 font-semibold uppercase tracking-wider">Workspaces</div>
           </div>
-          <div class="space-y-1">
+          <div class="space-y-4">
             <Show
-              when={props.sessionWorkspaces.length > 0}
+              when={props.workspaceGroups.length > 0}
               fallback={
                 <div class="px-3 py-2 rounded-lg border border-dashed border-gray-6 text-xs text-gray-9">
                   No workspaces in this session yet. Add one to get started.
                 </div>
               }
             >
-              <For each={props.sessionWorkspaces}>
-                {(workspace) => {
-                  const isActive = () => props.activeWorkspaceId === workspace.id;
-                  const isConnecting = () => props.connectingWorkspaceId === workspace.id;
-                  const pathLabel = () => workspacePathLabel(workspace);
-                  const detailLabel = () => workspaceDetailLabel(workspace);
+              <For each={props.workspaceGroups}>
+                {(group) => {
+                  const isActive = () => props.activeWorkspaceId === group.workspace.id;
+                  const isConnecting = () => props.connectingWorkspaceId === group.workspace.id;
+                  const pathLabel = () => workspacePathLabel(group.workspace);
+                  const detailLabel = () => workspaceDetailLabel(group.workspace);
+                  const sessions = () => group.sessions;
+                  const allowActions = () => !props.connectingWorkspaceId || isConnecting();
 
                   return (
-                    <button
-                      type="button"
-                      class={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
-                        isActive()
-                          ? "border-indigo-7/40 bg-indigo-2/30 text-gray-12"
-                          : "border-transparent text-gray-11 hover:text-gray-12 hover:bg-gray-2"
-                      } ${isConnecting() ? "opacity-70" : ""}`.trim()}
-                      onClick={() => {
-                        if (isActive() || isConnecting()) return;
-                        props.onSelectWorkspace(workspace.id);
-                      }}
-                      disabled={isActive() || isConnecting()}
-                    >
-                      <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0 space-y-0.5">
-                          <div class="flex items-center gap-2">
-                            <span class="text-xs font-medium truncate">
-                              {workspaceLabel(workspace)}
-                            </span>
-                            <Show when={workspace.workspaceType === "remote"}>
-                              <span class="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-gray-3 text-gray-11">
-                                Remote
+                    <div class="space-y-2">
+                      <button
+                        type="button"
+                        class={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
+                          isActive()
+                            ? "border-indigo-7/40 bg-indigo-2/30 text-gray-12"
+                            : "border-gray-6/40 text-gray-11 hover:text-gray-12 hover:bg-gray-2"
+                        } ${isConnecting() ? "opacity-70" : ""}`.trim()}
+                        onClick={() => {
+                          if (isActive() || isConnecting()) return;
+                          if (!allowActions()) return;
+                          props.onSelectWorkspace(group.workspace.id);
+                        }}
+                        disabled={isActive() || isConnecting() || !allowActions()}
+                      >
+                        <div class="flex items-start justify-between gap-2">
+                          <div class="min-w-0 space-y-0.5">
+                            <div class="flex items-center gap-2">
+                              <span class="text-xs font-semibold truncate">
+                                {workspaceLabel(group.workspace)}
                               </span>
+                              <Show when={group.workspace.workspaceType === "remote"}>
+                                <span class="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-gray-3 text-gray-11">
+                                  Remote
+                                </span>
+                              </Show>
+                            </div>
+                            <Show when={pathLabel()}>
+                              <div class="text-[10px] text-gray-9 font-mono truncate">{pathLabel()}</div>
+                            </Show>
+                            <Show when={detailLabel() && detailLabel() !== pathLabel()}>
+                              <div class="text-[10px] text-gray-8 truncate">{detailLabel()}</div>
                             </Show>
                           </div>
-                          <Show when={pathLabel()}>
-                            <div class="text-[10px] text-gray-9 font-mono truncate">{pathLabel()}</div>
-                          </Show>
-                          <Show when={detailLabel() && detailLabel() !== pathLabel()}>
-                            <div class="text-[10px] text-gray-8 truncate">{detailLabel()}</div>
-                          </Show>
-                        </div>
-                        <div class="flex items-center gap-2 text-[10px] shrink-0">
-                          <Show when={isConnecting()}>
-                            <Loader2 size={12} class="text-gray-10 animate-spin" />
-                          </Show>
-                          <Show when={!isConnecting()}>
-                            <Show when={isActive()} fallback={<span class="text-gray-9">Switch</span>}>
-                              <span class="text-green-11 font-medium">Active</span>
+                          <div class="flex items-center gap-2 text-[10px] shrink-0">
+                            <Show when={isConnecting()}>
+                              <Loader2 size={12} class="text-gray-10 animate-spin" />
                             </Show>
-                          </Show>
+                            <Show when={!isConnecting()}>
+                              <Show when={isActive()} fallback={<span class="text-gray-9">Switch</span>}>
+                                <span class="text-green-11 font-medium">Active</span>
+                              </Show>
+                            </Show>
+                          </div>
                         </div>
+                      </button>
+                      <div class="space-y-1 pl-2">
+                        <Show
+                          when={sessions().length > 0}
+                          fallback={
+                            <div class="px-3 py-2 rounded-lg border border-dashed border-gray-6 text-xs text-gray-9">
+                              No sessions yet.
+                            </div>
+                          }
+                        >
+                          <For each={sessions().slice(0, 8)}>
+                            {(session) => (
+                              <button
+                                class={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                                  session.id === props.selectedSessionId
+                                    ? "bg-gray-3 text-gray-12 font-medium"
+                                    : "text-gray-11 hover:text-gray-12 hover:bg-gray-2"
+                                } ${!allowActions() ? "opacity-70" : ""}`}
+                                onClick={() => {
+                                  if (!allowActions()) return;
+                                  props.onSelectSession(group.workspace.id, session.id);
+                                }}
+                                onContextMenu={(event) => {
+                                  if (!isActive()) return;
+                                  openContextMenu(event, session.id);
+                                }}
+                                disabled={!allowActions()}
+                              >
+                                <div class="flex items-center justify-between gap-2 w-full overflow-hidden">
+                                  <div class="truncate">{session.title}</div>
+                                  <Show
+                                    when={
+                                      props.sessionStatusById[session.id] &&
+                                      props.sessionStatusById[session.id] !== "idle"
+                                    }
+                                  >
+                                    <span
+                                      class={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                                        props.sessionStatusById[session.id] === "running"
+                                          ? "border-amber-7/50 text-amber-11 bg-amber-2/50"
+                                          : "border-gray-7/50 text-gray-10 bg-gray-2/50"
+                                      }`}
+                                    >
+                                      <div
+                                        class={`w-1 h-1 rounded-full ${
+                                          props.sessionStatusById[session.id] === "running"
+                                            ? "bg-amber-9 animate-pulse"
+                                            : "bg-gray-9"
+                                        }`}
+                                      />
+                                    </span>
+                                  </Show>
+                                </div>
+                              </button>
+                            )}
+                          </For>
+                        </Show>
                       </div>
-                    </button>
+                    </div>
                   );
                 }}
               </For>
             </Show>
-          </div>
-        </div>
-
-        <div>
-          <div class="text-xs text-gray-10 font-semibold mb-3 px-2 truncate">
-            Sessions · {props.workspaceName}
-          </div>
-          <div class="space-y-1">
-            <Show
-              when={props.sessions.length > 0}
-              fallback={
-                <div class="px-3 py-2 rounded-lg border border-dashed border-gray-6 text-xs text-gray-9">
-                  No sessions yet. Start a task to see your work here.
-                </div>
-              }
+            <button
+              type="button"
+              class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-gray-11 border border-dashed border-gray-6 hover:border-gray-7 hover:text-gray-12 hover:bg-gray-2 transition-colors"
+              onClick={props.onAddWorkspace}
             >
-              <For each={props.sessions.slice(0, 8)}>
-                {(session) => (
-                  <button
-                    class={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                      session.id === props.selectedSessionId
-                        ? "bg-gray-3 text-gray-12 font-medium"
-                        : "text-gray-11 hover:text-gray-12 hover:bg-gray-2"
-                    }`}
-                    onClick={() => props.onSelectSession(session.id)}
-                    onContextMenu={(event) => openContextMenu(event, session.id)}
-                  >
-                      <div class="flex items-center justify-between gap-2 w-full overflow-hidden">
-                        <div class="truncate">{session.title}</div>
-                        <Show
-                          when={
-                            props.sessionStatusById[session.id] &&
-                            props.sessionStatusById[session.id] !== "idle"
-                          }
-                        >
-                        <span
-                          class={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
-                            props.sessionStatusById[session.id] === "running"
-                              ? "border-amber-7/50 text-amber-11 bg-amber-2/50"
-                              : "border-gray-7/50 text-gray-10 bg-gray-2/50"
-                          }`}
-                        >
-                          <div
-                            class={`w-1 h-1 rounded-full ${
-                              props.sessionStatusById[session.id] === "running"
-                                ? "bg-amber-9 animate-pulse"
-                                : "bg-gray-9"
-                            }`}
-                          />
-                        </span>
-                      </Show>
-                    </div>
-                  </button>
-                )}
-              </For>
-            </Show>
+              <Plus size={14} />
+              Add new workspace
+            </button>
           </div>
         </div>
 

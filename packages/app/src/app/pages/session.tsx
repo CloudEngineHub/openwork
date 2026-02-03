@@ -131,6 +131,7 @@ export type SessionViewProps = {
 };
 
 type SessionWorkspaceMap = Record<string, string[]>;
+type SessionSummary = { id: string; title: string; slug?: string | null };
 
 const SESSION_WORKSPACE_STORE_KEY = "openwork.session-workspaces.v1";
 
@@ -178,6 +179,7 @@ export default function SessionView(props: SessionViewProps) {
   const [agentPickerReady, setAgentPickerReady] = createSignal(false);
   const [agentPickerError, setAgentPickerError] = createSignal<string | null>(null);
   const [sessionWorkspaceIds, setSessionWorkspaceIds] = createSignal<string[]>([]);
+  const [sessionsByWorkspaceId, setSessionsByWorkspaceId] = createSignal<Record<string, SessionSummary[]>>({});
   const [agentOptions, setAgentOptions] = createSignal<Agent[]>([]);
   const [autoScrollEnabled, setAutoScrollEnabled] = createSignal(false);
   const [scrollOnNextUpdate, setScrollOnNextUpdate] = createSignal(false);
@@ -216,8 +218,9 @@ export default function SessionView(props: SessionViewProps) {
     const knownIds = new Set(untrack(() => props.workspaces).map((workspace) => workspace.id));
     if (!knownIds.has(workspaceId)) return;
     updateSessionWorkspaces(sessionId, (current) => {
-      const filtered = current.filter((id) => id !== workspaceId && knownIds.has(id));
-      return [workspaceId, ...filtered];
+      const filtered = current.filter((id) => knownIds.has(id));
+      if (filtered.includes(workspaceId)) return filtered;
+      return [...filtered, workspaceId];
     });
   };
 
@@ -685,23 +688,39 @@ export default function SessionView(props: SessionViewProps) {
     return props.sessions.find((session) => session.id === id)?.title ?? "";
   });
 
-  const workspaceLabel = createMemo(() => {
-    const name = props.activeWorkspaceDisplay.name.trim();
-    if (name) return name;
-    return "Workspace";
-  });
-
   const sessionWorkspaces = createMemo(() => {
     const byId = new Map(props.workspaces.map((workspace) => [workspace.id, workspace]));
     const ids = sessionWorkspaceIds();
     const list = ids
       .map((id) => byId.get(id))
       .filter((workspace): workspace is WorkspaceInfo => Boolean(workspace));
+    if (list.length) return list;
     const activeId = props.activeWorkspaceId;
     if (!activeId) return list;
     const active = byId.get(activeId);
-    if (!active) return list;
-    return [active, ...list.filter((workspace) => workspace.id !== activeId)];
+    return active ? [active] : list;
+  });
+
+  createEffect(() => {
+    const workspaceId = props.activeWorkspaceId;
+    if (!workspaceId) return;
+    const list = props.sessions.map((session) => ({
+      id: session.id,
+      title: session.title,
+      slug: session.slug,
+    }));
+    setSessionsByWorkspaceId((prev) => ({
+      ...prev,
+      [workspaceId]: list,
+    }));
+  });
+
+  const sessionWorkspaceGroups = createMemo(() => {
+    const byWorkspace = sessionsByWorkspaceId();
+    return sessionWorkspaces().map((workspace) => ({
+      workspace,
+      sessions: byWorkspace[workspace.id] ?? [],
+    }));
   });
 
   createEffect(
@@ -1274,6 +1293,19 @@ export default function SessionView(props: SessionViewProps) {
     props.setWorkspacePickerOpen(true);
   };
 
+  const handleSelectSession = async (workspaceId: string, sessionId: string) => {
+    const targetWorkspaceId = workspaceId?.trim();
+    if (!targetWorkspaceId || !sessionId) return;
+    if (props.connectingWorkspaceId && props.connectingWorkspaceId !== targetWorkspaceId) return;
+    if (targetWorkspaceId !== props.activeWorkspaceId) {
+      const result = await props.activateWorkspace(targetWorkspaceId);
+      if (result === false) return;
+    }
+    await props.selectSession(sessionId);
+    props.setView("session", sessionId);
+    props.setTab("sessions");
+  };
+
   const openProviderAuth = () => {
     void props.openProviderAuthModal().catch((error) => {
       const message = error instanceof Error ? error.message : "Connect failed";
@@ -1334,19 +1366,13 @@ export default function SessionView(props: SessionViewProps) {
                 onToggleSection={(section) => {
                   props.setExpandedSidebarSections((curr) => ({...curr, [section]: !curr[section]}));
                 }}
-                workspaceName={workspaceLabel()}
-                sessionWorkspaces={sessionWorkspaces()}
+                workspaceGroups={sessionWorkspaceGroups()}
                 activeWorkspaceId={props.activeWorkspaceId}
                 connectingWorkspaceId={props.connectingWorkspaceId}
                 onSelectWorkspace={props.activateWorkspace}
                 onAddWorkspace={openWorkspacePicker}
-                sessions={props.sessions}
+                onSelectSession={handleSelectSession}
                 selectedSessionId={props.selectedSessionId}
-                 onSelectSession={async (id) => {
-                    await props.selectSession(id);
-                    props.setView("session", id);
-                    props.setTab("sessions");
-                 }}
                 sessionStatusById={props.sessionStatusById}
                 onCreateSession={props.createSessionAndOpen}
                 onDeleteSession={handleDeleteSession}
