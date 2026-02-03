@@ -293,10 +293,10 @@ export default function SessionSidebar(props: SidebarProps) {
                                 </Show>
                               </div>
                               <Show when={pathLabel()}>
-                                <div class="text-[10px] text-gray-9 font-mono truncate">{pathLabel()}</div>
+                                <div class="text-[9px] text-gray-8/80 font-mono truncate">{pathLabel()}</div>
                               </Show>
                               <Show when={detailLabel() && detailLabel() !== pathLabel()}>
-                                <div class="text-[10px] text-gray-8 truncate">{detailLabel()}</div>
+                                <div class="text-[9px] text-gray-7/80 truncate">{detailLabel()}</div>
                               </Show>
                             </div>
                             <div class="flex items-center gap-2 text-[10px] shrink-0">
