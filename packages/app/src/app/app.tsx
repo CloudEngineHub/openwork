@@ -2682,7 +2682,7 @@ export default function App() {
     setNotionSkillInstalled(false);
 
     try {
-      if (canUseOpenworkServer) {
+      if (canUseOpenworkServer && openworkClient && openworkWorkspaceId) {
         await openworkClient.addMcp(openworkWorkspaceId, {
           name: "notion",
           config: {
@@ -2983,7 +2983,7 @@ export default function App() {
         }
         mcpEntryConfig["command"] = entry.command;
       }
-      if (canUseOpenworkServer) {
+      if (canUseOpenworkServer && openworkClient && openworkWorkspaceId) {
         await openworkClient.addMcp(openworkWorkspaceId, {
           name: slug,
           config: mcpEntryConfig,

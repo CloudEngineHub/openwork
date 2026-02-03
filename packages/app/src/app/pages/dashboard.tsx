@@ -1,4 +1,14 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  untrack,
+} from "solid-js";
 import type {
   DashboardTab,
   McpServerEntry,
@@ -45,6 +55,7 @@ import {
   Package,
   Play,
   Plus,
+  RefreshCcw,
   Server,
   Terminal,
 } from "lucide-solid";
@@ -282,6 +293,13 @@ export default function DashboardView(props: DashboardViewProps) {
 
   const quickCommands = createMemo(() => props.workspaceCommands.slice(0, 3));
   const canExportWorkspace = createMemo(() => props.activeWorkspaceDisplay.workspaceType !== "remote");
+  const showRefreshAction = createMemo(() => refreshableTabs.has(props.tab));
+  const isRefreshingCurrentTab = createMemo(
+    () => refreshInProgress() && refreshingTab() === props.tab
+  );
+  const refreshActionLabel = createMemo(() =>
+    isRefreshingCurrentTab() ? "Refreshing..." : "Refresh"
+  );
 
   const openSessionFromList = (sessionId: string) => {
     // Defer view switch to avoid click-through on the same event frame.
@@ -292,9 +310,18 @@ export default function DashboardView(props: DashboardViewProps) {
     }, 0);
   };
 
-  // Track last refreshed tab to avoid duplicate calls
-  const [lastRefreshedTab, setLastRefreshedTab] = createSignal<string | null>(null);
+  const REFRESH_TTL_MS = 45_000;
+  const refreshableTabs = new Set<DashboardTab>([
+    "sessions",
+    "scheduled",
+    "skills",
+    "plugins",
+    "mcp",
+  ]);
+  const [lastRefreshedByTab, setLastRefreshedByTab] = createSignal<Record<string, number>>({});
   const [refreshInProgress, setRefreshInProgress] = createSignal(false);
+  const [refreshingTab, setRefreshingTab] = createSignal<DashboardTab | null>(null);
+  const [queuedRefreshTab, setQueuedRefreshTab] = createSignal<DashboardTab | null>(null);
   const [taskDraft, setTaskDraft] = createSignal("");
   const [providerAuthActionBusy, setProviderAuthActionBusy] = createSignal(false);
   const [copiedWorkspaceId, setCopiedWorkspaceId] = createSignal<string | null>(null);
@@ -367,56 +394,57 @@ export default function DashboardView(props: DashboardViewProps) {
     }
   };
 
-  createEffect(() => {
-    const currentTab = props.tab;
-
-    // Skip if we already refreshed this tab or a refresh is in progress
-    if (lastRefreshedTab() === currentTab || refreshInProgress()) {
+  const refreshTab = async (tab: DashboardTab, options?: { force?: boolean }) => {
+    if (!refreshableTabs.has(tab)) return;
+    if (refreshInProgress()) {
+      setQueuedRefreshTab(tab);
       return;
     }
 
-    // Track that we're refreshing this tab
+    const last = lastRefreshedByTab()[tab] ?? 0;
+    const now = Date.now();
+    if (!options?.force && now - last < REFRESH_TTL_MS) {
+      return;
+    }
+
     setRefreshInProgress(true);
-    setLastRefreshedTab(currentTab);
+    setRefreshingTab(tab);
+    setLastRefreshedByTab((prev) => ({ ...prev, [tab]: now }));
 
-    // Use a cancelled flag to prevent stale updates after navigation
-    let cancelled = false;
-
-    const doRefresh = async () => {
-      try {
-        if (currentTab === "skills" && !cancelled) {
-          await props.refreshSkills();
-        }
-        if (currentTab === "plugins" && !cancelled) {
-          await props.refreshPlugins();
-        }
-        if (currentTab === "mcp" && !cancelled) {
-          await props.refreshMcpServers();
-        }
-        if (currentTab === "scheduled" && !cancelled) {
-          await props.refreshScheduledJobs();
-        }
-        if (currentTab === "sessions" && !cancelled) {
-          // Stagger these calls to avoid request stacking
-          await props.refreshSkills();
-          if (!cancelled) {
-            await props.refreshPlugins("project");
-          }
-        }
-      } catch {
-        // Ignore errors during navigation
-      } finally {
-        if (!cancelled) {
-          setRefreshInProgress(false);
-        }
+    try {
+      if (tab === "skills") {
+        await props.refreshSkills();
       }
-    };
-
-    doRefresh();
-
-    onCleanup(() => {
-      cancelled = true;
+      if (tab === "plugins") {
+        await props.refreshPlugins();
+      }
+      if (tab === "mcp") {
+        await props.refreshMcpServers();
+      }
+      if (tab === "scheduled") {
+        await props.refreshScheduledJobs();
+      }
+      if (tab === "sessions") {
+        await props.refreshSkills();
+        await props.refreshPlugins("project");
+      }
+    } catch {
+      // Ignore errors during navigation
+    } finally {
       setRefreshInProgress(false);
+      setRefreshingTab(null);
+      const queued = queuedRefreshTab();
+      setQueuedRefreshTab(null);
+      if (queued && queued !== tab) {
+        void refreshTab(queued, { force: true });
+      }
+    }
+  };
+
+  createEffect(() => {
+    const currentTab = props.tab;
+    untrack(() => {
+      void refreshTab(currentTab);
     });
   });
 
@@ -519,6 +547,23 @@ export default function DashboardView(props: DashboardViewProps) {
             </Show>
           </div>
           <div class="flex items-center gap-2">
+            <Show when={showRefreshAction()}>
+              <Button
+                variant="outline"
+                class="text-xs h-9"
+                onClick={() => {
+                  void refreshTab(props.tab, { force: true });
+                }}
+                disabled={isRefreshingCurrentTab()}
+                title={isRefreshingCurrentTab() ? "Refreshing" : "Refresh data"}
+              >
+                <RefreshCcw
+                  size={14}
+                  class={isRefreshingCurrentTab() ? "animate-spin" : ""}
+                />
+                {refreshActionLabel()}
+              </Button>
+            </Show>
             <Show when={props.tab === "home" || props.tab === "sessions"}>
               <Button
                 variant="outline"
