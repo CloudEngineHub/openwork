@@ -347,8 +347,12 @@ export function createSessionStore(options: {
       return w[key];
     })();
     const mark = (() => {
+      if (!options.developerMode()) {
+        return (_label: string) => {};
+      }
       const start = Date.now();
-      return (label: string) => console.log(`[selectSession run ${runId}] ${label} (+${Date.now() - start}ms)`);
+      return (label: string) =>
+        console.log(`[selectSession run ${runId}] ${label} (+${Date.now() - start}ms)`);
     })();
 
     mark("start");

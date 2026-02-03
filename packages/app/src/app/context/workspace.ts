@@ -367,7 +367,6 @@ export function createWorkspaceStore(options: {
     const next = workspaces().find((w) => w.id === id) ?? null;
     if (!next) return false;
     const isRemote = next.workspaceType === "remote";
-    console.log("[workspace] activate", { id: next.id, type: next.workspaceType });
 
     const remoteType = isRemote ? normalizeRemoteType(next.remoteType) : "opencode";
     const baseUrl = isRemote ? next.baseUrl?.trim() ?? "" : "";
@@ -664,11 +663,6 @@ export function createWorkspaceStore(options: {
     auth?: OpencodeAuth,
     connectOptions?: { quiet?: boolean },
   ) {
-    console.log("[workspace] connect", {
-      baseUrl: nextBaseUrl,
-      directory: directory ?? null,
-      workspaceType: context?.workspaceType ?? null,
-    });
     const quiet = connectOptions?.quiet ?? false;
     options.setError(null);
     if (!quiet) {
@@ -699,7 +693,6 @@ export function createWorkspaceStore(options: {
           const discovered = pathInfo.directory?.trim() ?? "";
           if (discovered) {
             resolvedDirectory = discovered;
-            console.log("[workspace] remote directory resolved", resolvedDirectory);
             if (isTauriRuntime() && context.workspaceId) {
               const updated = await workspaceUpdateRemote({
                 workspaceId: context.workspaceId,
@@ -712,7 +705,6 @@ export function createWorkspaceStore(options: {
             nextClient = createClient(nextBaseUrl, resolvedDirectory, auth);
           }
         } catch (error) {
-          console.log("[workspace] remote directory lookup failed", error);
         }
       }
 
@@ -858,11 +850,6 @@ export function createWorkspaceStore(options: {
     }
 
     options.setError(null);
-    console.log("[workspace] create remote", {
-      hostUrl: hostUrl || null,
-      directory: directory || null,
-      displayName,
-    });
 
     options.setStartupPreference("server");
 
@@ -987,7 +974,6 @@ export function createWorkspaceStore(options: {
     const id = workspaceId.trim();
     if (!id) return;
 
-    console.log("[workspace] forget", { id });
 
     try {
       const previousActive = activeWorkspaceId();

@@ -538,7 +538,6 @@ export default function DashboardView(props: DashboardViewProps) {
                   e.currentTarget.setPointerCapture?.(e.pointerId);
                 }}
                 onPointerUp={() => {
-                  console.log("[DEBUG] new task button pointerup");
                   props.createSessionAndOpen();
                 }}
                 disabled={props.newTaskDisabled}

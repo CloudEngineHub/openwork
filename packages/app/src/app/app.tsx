@@ -525,6 +525,10 @@ export default function App() {
   const mountTime = Date.now();
   const [lastKnownConfigSnapshot, setLastKnownConfigSnapshot] = createSignal("");
   const [developerMode, setDeveloperMode] = createSignal(false);
+  const debugLog = (...args: unknown[]) => {
+    if (!developerMode()) return;
+    console.log(...args);
+  };
   let markReloadRequiredRef: (reason: ReloadReason, trigger?: ReloadTrigger) => void = () => {};
   let setReloadLastFinishedAtRef: (value: number) => void = () => {};
 
@@ -2208,10 +2212,10 @@ export default function App() {
 
   createEffect(() => {
     if (!developerMode()) return;
-    console.log("[ReloadToast] reloadRequired:", reloadRequired());
-    console.log("[ReloadToast] lastTriggeredAt:", reloadLastTriggeredAt());
-    console.log("[ReloadToast] dismissedAt:", reloadToastDismissedAt());
-    console.log("[ReloadToast] trigger:", reloadTrigger());
+    debugLog("[ReloadToast] reloadRequired:", reloadRequired());
+    debugLog("[ReloadToast] lastTriggeredAt:", reloadLastTriggeredAt());
+    debugLog("[ReloadToast] dismissedAt:", reloadToastDismissedAt());
+    debugLog("[ReloadToast] trigger:", reloadTrigger());
   });
 
   const reloadWarning = createMemo(() =>
@@ -2870,13 +2874,13 @@ export default function App() {
   }
 
   async function connectMcp(entry: (typeof MCP_QUICK_CONNECT)[number]) {
-    console.log("[connectMcp] called with entry:", entry);
+    debugLog("[connectMcp] called with entry:", entry);
 
     const isRemoteWorkspace =
       workspaceStore.activeWorkspaceDisplay().workspaceType === "remote" ||
       (!isTauriRuntime() && openworkServerStatus() === "connected");
     const projectDir = workspaceProjectDir().trim();
-    console.log("[connectMcp] projectDir:", projectDir);
+    debugLog("[connectMcp] projectDir:", projectDir);
 
     const openworkClient = openworkServerClient();
     let openworkWorkspaceId = openworkServerWorkspaceId();
@@ -2900,26 +2904,26 @@ export default function App() {
       openworkCapabilities?.mcp?.write;
 
     if (isRemoteWorkspace && !canUseOpenworkServer) {
-      console.log("[connectMcp] ❌ openwork server unavailable");
+      debugLog("[connectMcp] ❌ openwork server unavailable");
       setMcpStatus("OpenWork server unavailable. MCP config is read-only.");
       return;
     }
 
     if (!canUseOpenworkServer && !isTauriRuntime()) {
-      console.log("[connectMcp] ❌ not Tauri runtime");
+      debugLog("[connectMcp] ❌ not Tauri runtime");
       setMcpStatus(t("mcp.desktop_required", currentLocale()));
       return;
     }
-    console.log("[connectMcp] ✓ runtime ready");
+    debugLog("[connectMcp] ✓ runtime ready");
 
     if (!isRemoteWorkspace && !projectDir) {
-      console.log("[connectMcp] ❌ no projectDir");
+      debugLog("[connectMcp] ❌ no projectDir");
       setMcpStatus(t("mcp.pick_workspace_first", currentLocale()));
       return;
     }
 
     let activeClient = client();
-    console.log("[connectMcp] activeClient:", activeClient ? "exists" : "null");
+    debugLog("[connectMcp] activeClient:", activeClient ? "exists" : "null");
     if (!activeClient) {
       const openworkBaseUrl = openworkServerBaseUrl().trim();
       const auth = openworkServerAuth();
@@ -2930,7 +2934,7 @@ export default function App() {
       }
     }
     if (!activeClient) {
-      console.log("[connectMcp] ❌ no activeClient");
+      debugLog("[connectMcp] ❌ no activeClient");
       setMcpStatus(t("mcp.connect_server_first", currentLocale()));
       return;
     }
@@ -2950,19 +2954,19 @@ export default function App() {
       }
     }
     if (!resolvedProjectDir) {
-      console.log("[connectMcp] ❌ no projectDir after lookup");
+      debugLog("[connectMcp] ❌ no projectDir after lookup");
       setMcpStatus(t("mcp.pick_workspace_first", currentLocale()));
       return;
     }
 
     const slug = entry.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const entryType = entry.type ?? "remote";
-    console.log("[connectMcp] slug:", slug);
+    debugLog("[connectMcp] slug:", slug);
 
     try {
       setMcpStatus(null);
       setMcpConnectingName(entry.name);
-      console.log("[connectMcp] connecting name set to:", entry.name);
+      debugLog("[connectMcp] connecting name set to:", entry.name);
 
       const mcpEntryConfig: Record<string, unknown> = {
         type: entryType,
@@ -2988,19 +2992,19 @@ export default function App() {
           name: slug,
           config: mcpEntryConfig,
         });
-        console.log("[connectMcp] added MCP via OpenWork server");
+        debugLog("[connectMcp] added MCP via OpenWork server");
       } else {
         // Step 1: Read existing opencode.json config
-        console.log("[connectMcp] reading opencode config for projectDir:", projectDir);
+        debugLog("[connectMcp] reading opencode config for projectDir:", projectDir);
         const configFile = await readOpencodeConfig("project", resolvedProjectDir);
-        console.log("[connectMcp] config file result:", configFile);
+        debugLog("[connectMcp] config file result:", configFile);
 
         // Step 2: Parse and merge the MCP entry into the config
         let existingConfig: Record<string, unknown> = {};
         if (configFile.exists && configFile.content?.trim()) {
           try {
             existingConfig = parse(configFile.content) ?? {};
-            console.log("[connectMcp] parsed existing config:", existingConfig);
+            debugLog("[connectMcp] parsed existing config:", existingConfig);
           } catch (parseErr) {
             console.warn("[connectMcp] failed to parse existing config, starting fresh:", parseErr);
             existingConfig = {};
@@ -3018,7 +3022,7 @@ export default function App() {
 
         // Add the new MCP server entry
         mcpSection[slug] = mcpEntryConfig;
-        console.log("[connectMcp] merged MCP config:", existingConfig);
+        debugLog("[connectMcp] merged MCP config:", existingConfig);
 
         // Step 3: Write the updated config back
         const writeResult = await writeOpencodeConfig(
@@ -3026,7 +3030,7 @@ export default function App() {
           resolvedProjectDir,
           `${JSON.stringify(existingConfig, null, 2)}\n`
         );
-        console.log("[connectMcp] writeOpencodeConfig result:", writeResult);
+        debugLog("[connectMcp] writeOpencodeConfig result:", writeResult);
         if (!writeResult.ok) {
           throw new Error(writeResult.stderr || writeResult.stdout || "Failed to write opencode.json");
         }
@@ -3052,20 +3056,20 @@ export default function App() {
         name: slug,
         config: mcpAddConfig,
       };
-      console.log("[connectMcp] calling activeClient.mcp.add with:", mcpAddPayload);
+      debugLog("[connectMcp] calling activeClient.mcp.add with:", mcpAddPayload);
 
       const rawResult = await activeClient.mcp.add(mcpAddPayload);
-      console.log("[connectMcp] mcp.add raw result:", rawResult);
+      debugLog("[connectMcp] mcp.add raw result:", rawResult);
 
       const status = unwrap(rawResult);
-      console.log("[connectMcp] mcp.add unwrapped status:", status);
+      debugLog("[connectMcp] mcp.add unwrapped status:", status);
 
       setMcpStatuses(status as McpStatusMap);
       await refreshMcpServers();
 
       // Step 5: If OAuth, open the auth modal (modal handles the auth flow)
       if (entry.oauth) {
-        console.log("[connectMcp] entry has OAuth, opening auth modal for:", entry.name);
+        debugLog("[connectMcp] entry has OAuth, opening auth modal for:", entry.name);
         setMcpAuthEntry(entry);
         setMcpAuthModalOpen(true);
       } else {
@@ -3073,49 +3077,49 @@ export default function App() {
       }
 
       markReloadRequired("mcp", { trigger: { type: "mcp", name: slug, action: "added" } });
-      console.log("[connectMcp] ✓ marked reload required, refreshing servers");
+      debugLog("[connectMcp] ✓ marked reload required, refreshing servers");
 
       await refreshMcpServers();
-      console.log("[connectMcp] ✓ done");
+      debugLog("[connectMcp] ✓ done");
     } catch (e) {
       console.error("[connectMcp] ❌ error:", e);
       setMcpStatus(e instanceof Error ? e.message : t("mcp.connect_failed", currentLocale()));
     } finally {
       setMcpConnectingName(null);
-      console.log("[connectMcp] finally block, connecting name cleared");
+      debugLog("[connectMcp] finally block, connecting name cleared");
     }
   }
 
   async function createSessionAndOpen() {
-    console.log("[DEBUG] createSessionAndOpen");
-    console.log("[DEBUG] current baseUrl:", baseUrl());
-    console.log("[DEBUG] engine info:", engine());
-    console.log("[DEBUG] creating session");
+    debugLog("[DEBUG] createSessionAndOpen");
+    debugLog("[DEBUG] current baseUrl:", baseUrl());
+    debugLog("[DEBUG] engine info:", engine());
+    debugLog("[DEBUG] creating session");
     const c = client();
     if (!c) {
-      console.log("[DEBUG] no client available!");
+      debugLog("[DEBUG] no client available!");
       return;
     }
 
     // Abort any in-flight refresh operations to free up connection resources
-    console.log("[DEBUG] aborting in-flight refreshes");
+    debugLog("[DEBUG] aborting in-flight refreshes");
     abortRefreshes();
 
     // Small delay to allow pending requests to settle
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    console.log("[DEBUG] client found");
+    debugLog("[DEBUG] client found");
     setBusy(true);
-    console.log("[DEBUG] busy set");
+    debugLog("[DEBUG] busy set");
     setBusyLabel("status.creating_task");
-    console.log("[DEBUG] busy label set");
+    debugLog("[DEBUG] busy label set");
     setBusyStartedAt(Date.now());
-    console.log("[DEBUG] busy started at set");
+    debugLog("[DEBUG] busy started at set");
     setError(null);
-    console.log("[DEBUG] error set");
+    debugLog("[DEBUG] error set");
     setCreatingSession(true);
 
-    console.log("[DEBUG] with timeout defined");
+    debugLog("[DEBUG] with timeout defined");
     const withTimeout = async <T,>(
       promise: Promise<T>,
       ms: number,
@@ -3149,9 +3153,9 @@ export default function App() {
       return (label: string, payload?: unknown) => {
         const elapsedMs = Date.now() - start;
         if (payload === undefined) {
-          console.log(`[run ${runId}] ${label} (+${elapsedMs}ms)`);
+          debugLog(`[run ${runId}] ${label} (+${elapsedMs}ms)`);
         } else {
-          console.log(`[run ${runId}] ${label} (+${elapsedMs}ms)`, payload);
+          debugLog(`[run ${runId}] ${label} (+${elapsedMs}ms)`, payload);
         }
       };
     })();
