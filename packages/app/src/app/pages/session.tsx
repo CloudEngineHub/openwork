@@ -132,6 +132,33 @@ export type SessionViewProps = {
 
 type SessionSummary = { id: string; title: string; slug?: string | null };
 
+const WORKSPACE_ORDER_KEY = "openwork.workspace-order.v1";
+
+const readWorkspaceOrder = (): string[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_ORDER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is string => typeof entry === "string");
+  } catch {
+    return [];
+  }
+};
+
+const writeWorkspaceOrder = (order: string[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WORKSPACE_ORDER_KEY, JSON.stringify(order));
+  } catch {
+    // ignore
+  }
+};
+
+const arraysEqual = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
+
 export default function SessionView(props: SessionViewProps) {
   let messagesEndEl: HTMLDivElement | undefined;
   let chatContainerEl: HTMLDivElement | undefined;
@@ -147,6 +174,7 @@ export default function SessionView(props: SessionViewProps) {
   const [agentPickerBusy, setAgentPickerBusy] = createSignal(false);
   const [agentPickerReady, setAgentPickerReady] = createSignal(false);
   const [agentPickerError, setAgentPickerError] = createSignal<string | null>(null);
+  const [workspaceOrder, setWorkspaceOrder] = createSignal<string[]>(readWorkspaceOrder());
   const [sessionsByWorkspaceId, setSessionsByWorkspaceId] = createSignal<Record<string, SessionSummary[]>>({});
   const [agentOptions, setAgentOptions] = createSignal<Agent[]>([]);
   const [autoScrollEnabled, setAutoScrollEnabled] = createSignal(false);
@@ -621,17 +649,25 @@ export default function SessionView(props: SessionViewProps) {
     return props.sessions.find((session) => session.id === id)?.title ?? "";
   });
 
-  const sortedWorkspaces = createMemo(() => {
-    const activeId = props.activeWorkspaceId;
-    return props.workspaces
-      .slice()
-      .sort((a, b) => {
-        if (a.id === activeId) return -1;
-        if (b.id === activeId) return 1;
-        const aLabel = (a.displayName ?? a.openworkWorkspaceName ?? a.name ?? "").toLowerCase();
-        const bLabel = (b.displayName ?? b.openworkWorkspaceName ?? b.name ?? "").toLowerCase();
-        return aLabel.localeCompare(bLabel);
-      });
+  createEffect(() => {
+    const ids = props.workspaces.map((workspace) => workspace.id);
+    const base = workspaceOrder().length ? workspaceOrder() : readWorkspaceOrder();
+    const filtered = base.filter((id) => ids.includes(id));
+    const missing = ids.filter((id) => !filtered.includes(id));
+    const next = [...filtered, ...missing];
+    if (!arraysEqual(base, next)) {
+      writeWorkspaceOrder(next);
+    }
+    if (!arraysEqual(workspaceOrder(), next)) {
+      setWorkspaceOrder(next);
+    }
+  });
+
+  const orderedWorkspaces = createMemo(() => {
+    const byId = new Map(props.workspaces.map((workspace) => [workspace.id, workspace]));
+    const order = workspaceOrder();
+    const list = order.map((id) => byId.get(id)).filter((workspace): workspace is WorkspaceInfo => Boolean(workspace));
+    return list.length ? list : props.workspaces;
   });
 
   createEffect(() => {
@@ -650,7 +686,7 @@ export default function SessionView(props: SessionViewProps) {
 
   const sessionWorkspaceGroups = createMemo(() => {
     const byWorkspace = sessionsByWorkspaceId();
-    return sortedWorkspaces().map((workspace) => ({
+    return orderedWorkspaces().map((workspace) => ({
       workspace,
       sessions: byWorkspace[workspace.id] ?? [],
     }));
@@ -1208,6 +1244,24 @@ export default function SessionView(props: SessionViewProps) {
     props.setTab("sessions");
   };
 
+  const handleReorderWorkspace = (fromId: string, toId: string | null) => {
+    setWorkspaceOrder((current) => {
+      const base = current.length ? current : props.workspaces.map((workspace) => workspace.id);
+      if (!base.includes(fromId)) return current;
+      const next = base.filter((id) => id !== fromId);
+      if (toId) {
+        const index = next.indexOf(toId);
+        if (index === -1) return current;
+        next.splice(index, 0, fromId);
+      } else {
+        next.push(fromId);
+      }
+      if (arraysEqual(base, next)) return current;
+      writeWorkspaceOrder(next);
+      return next;
+    });
+  };
+
   const openProviderAuth = () => {
     void props.openProviderAuthModal().catch((error) => {
       const message = error instanceof Error ? error.message : "Connect failed";
@@ -1273,6 +1327,7 @@ export default function SessionView(props: SessionViewProps) {
                 connectingWorkspaceId={props.connectingWorkspaceId}
                 onSelectWorkspace={props.activateWorkspace}
                 onAddWorkspace={openWorkspacePicker}
+                onReorderWorkspace={handleReorderWorkspace}
                 onSelectSession={handleSelectSession}
                 selectedSessionId={props.selectedSessionId}
                 sessionStatusById={props.sessionStatusById}
