@@ -825,6 +825,7 @@ export default function DashboardView(props: DashboardViewProps) {
                 refreshJobs={props.refreshScheduledJobs}
                 deleteJob={props.deleteScheduledJob}
                 isWindows={props.isWindows}
+                openPlugins={() => props.setTab("plugins")}
               />
             </Match>
             <Match when={props.tab === "commands"}>

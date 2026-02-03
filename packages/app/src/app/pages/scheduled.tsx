@@ -7,6 +7,7 @@ import Button from "../components/button";
 import {
   Calendar,
   Clock,
+  Cpu,
   FolderOpen,
   RefreshCw,
   Terminal,
@@ -23,6 +24,7 @@ export type ScheduledTasksViewProps = {
   refreshJobs: (options?: { force?: boolean }) => void;
   deleteJob: (name: string) => Promise<void> | void;
   isWindows: boolean;
+  openPlugins: () => void;
 };
 
 const toRelative = (value?: string | null) => {
@@ -194,9 +196,15 @@ export default function ScheduledTasksView(props: ScheduledTasksViewProps) {
         <Show
           when={props.jobs.length}
           fallback={
-            <div class="px-6 py-10 text-sm text-gray-10">
-              No scheduled tasks yet. Add the opencode-scheduler plugin and create a job to
-              see it here.
+            <div class="px-6 py-10 text-sm text-gray-10 space-y-4">
+              <div>
+                No scheduled tasks yet. Add the opencode-scheduler plugin and create a job to
+                see it here.
+              </div>
+              <Button variant="secondary" onClick={props.openPlugins}>
+                <Cpu size={16} />
+                Open plugins
+              </Button>
             </div>
           }
         >
