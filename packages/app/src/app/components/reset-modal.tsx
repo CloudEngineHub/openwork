@@ -49,17 +49,26 @@ export default function ResetModal(props: ResetModalProps) {
 
             <div class="mt-6 space-y-4">
               <div class="rounded-xl bg-gray-1/20 border border-gray-6 p-3 text-xs text-gray-11">
-                <Switch>
-                  <Match when={props.mode === "onboarding"}>
-                    {translate("settings.reset_onboarding_warning")}
-                  </Match>
-                  <Match when={true}>{translate("settings.reset_app_data_warning")}</Match>
-                </Switch>
+                <ul class="space-y-2">
+                  <li class="flex items-start gap-2">
+                    <span class="mt-1 h-1.5 w-1.5 rounded-full bg-gray-8/70" />
+                    <span>
+                      <Switch>
+                        <Match when={props.mode === "onboarding"}>
+                          {translate("settings.reset_onboarding_warning")}
+                        </Match>
+                        <Match when={true}>{translate("settings.reset_app_data_warning")}</Match>
+                      </Switch>
+                    </span>
+                  </li>
+                  <Show when={props.hasActiveRuns}>
+                    <li class="flex items-start gap-2 text-red-11">
+                      <span class="mt-1 h-1.5 w-1.5 rounded-full bg-red-9/80" />
+                      <span>{translate("settings.reset_stop_active_runs")}</span>
+                    </li>
+                  </Show>
+                </ul>
               </div>
-
-              <Show when={props.hasActiveRuns}>
-                <div class="text-xs text-red-11">{translate("settings.reset_stop_active_runs")}</div>
-              </Show>
 
               <TextInput
                 label={translate("settings.reset_confirmation_label")}
