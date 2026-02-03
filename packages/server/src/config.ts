@@ -13,12 +13,17 @@ interface CliArgs {
   approvalMode?: ApprovalMode;
   approvalTimeoutMs?: number;
   opencodeBaseUrl?: string;
+  opencodeConnectUrl?: string;
   opencodeDirectory?: string;
   opencodeUsername?: string;
   opencodePassword?: string;
   workspaces: string[];
   corsOrigins?: string[];
   readOnly?: boolean;
+  targetId?: string;
+  targetLabel?: string;
+  targetType?: "local" | "remote";
+  connectUrl?: string;
   verbose?: boolean;
   version?: boolean;
   help?: boolean;
@@ -36,6 +41,13 @@ interface FileConfig {
   readOnly?: boolean;
   opencodeUsername?: string;
   opencodePassword?: string;
+  target?: {
+    id?: string;
+    label?: string;
+    type?: "local" | "remote";
+  };
+  connectUrl?: string;
+  opencodeConnectUrl?: string;
 }
 
 const DEFAULT_PORT = 8787;
@@ -102,6 +114,11 @@ export function parseCliArgs(argv: string[]): CliArgs {
       index += 1;
       continue;
     }
+    if (value === "--opencode-connect-url") {
+      args.opencodeConnectUrl = argv[index + 1];
+      index += 1;
+      continue;
+    }
     if (value === "--opencode-directory") {
       args.opencodeDirectory = argv[index + 1];
       index += 1;
@@ -128,6 +145,29 @@ export function parseCliArgs(argv: string[]): CliArgs {
       index += 1;
       continue;
     }
+    if (value === "--target-id") {
+      args.targetId = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (value === "--target-label") {
+      args.targetLabel = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (value === "--target-type") {
+      const next = argv[index + 1] as "local" | "remote" | undefined;
+      if (next === "local" || next === "remote") {
+        args.targetType = next;
+      }
+      index += 1;
+      continue;
+    }
+    if (value === "--connect-url") {
+      args.connectUrl = argv[index + 1];
+      index += 1;
+      continue;
+    }
     if (value === "--read-only") {
       args.readOnly = true;
       continue;
@@ -149,11 +189,16 @@ export function printHelp(): void {
     "  --approval <mode>        manual | auto",
     "  --approval-timeout <ms>  Approval timeout",
     "  --opencode-base-url <url> OpenCode base URL to share",
+    "  --opencode-connect-url <url> OpenCode connect URL to share",
     "  --opencode-directory <path> OpenCode workspace directory to share",
     "  --opencode-username <user> OpenCode server username",
     "  --opencode-password <pass> OpenCode server password",
     "  --workspace <path>       Workspace root (repeatable)",
     "  --cors <origins>          Comma-separated origins or *",
+    "  --target-id <id>          Target id for descriptor",
+    "  --target-label <label>    Target label for descriptor",
+    "  --target-type <type>      local | remote",
+    "  --connect-url <url>       OpenWork connect URL",
     "  --read-only              Disable writes",
     "  --verbose                Print resolved config",
     "  --version                Show version",
@@ -181,10 +226,12 @@ export async function resolveServerConfig(cli: CliArgs): Promise<ServerConfig> {
         : fileConfig.workspaces ?? [];
 
   const envOpencodeBaseUrl = process.env.OPENWORK_OPENCODE_BASE_URL;
+  const envOpencodeConnectUrl = process.env.OPENWORK_OPENCODE_CONNECT_URL;
   const envOpencodeDirectory = process.env.OPENWORK_OPENCODE_DIRECTORY;
   const envOpencodeUsername = process.env.OPENWORK_OPENCODE_USERNAME;
   const envOpencodePassword = process.env.OPENWORK_OPENCODE_PASSWORD;
   const opencodeBaseUrl = cli.opencodeBaseUrl ?? envOpencodeBaseUrl;
+  const opencodeConnectUrl = cli.opencodeConnectUrl ?? envOpencodeConnectUrl ?? fileConfig.opencodeConnectUrl;
   const opencodeDirectory = cli.opencodeDirectory ?? envOpencodeDirectory;
   const opencodeUsername = cli.opencodeUsername ?? envOpencodeUsername ?? fileConfig.opencodeUsername;
   const opencodePassword = cli.opencodePassword ?? envOpencodePassword ?? fileConfig.opencodePassword;
@@ -263,6 +310,18 @@ export async function resolveServerConfig(cli: CliArgs): Promise<ServerConfig> {
   const host = cli.host ?? process.env.OPENWORK_HOST ?? fileConfig.host ?? DEFAULT_HOST;
   const port = cli.port ?? (process.env.OPENWORK_PORT ? Number(process.env.OPENWORK_PORT) : undefined) ?? fileConfig.port ?? DEFAULT_PORT;
 
+  const envTargetId = process.env.OPENWORK_TARGET_ID;
+  const envTargetLabel = process.env.OPENWORK_TARGET_LABEL;
+  const envTargetType = process.env.OPENWORK_TARGET_TYPE as "local" | "remote" | undefined;
+  const targetType = cli.targetType ?? envTargetType ?? fileConfig.target?.type ?? "local";
+  const defaultTargetLabel = targetType === "remote" ? "Remote target" : "Local (this device)";
+  const target = {
+    id: cli.targetId ?? envTargetId ?? fileConfig.target?.id ?? (targetType === "remote" ? "tgt-remote" : "tgt-local"),
+    label: cli.targetLabel ?? envTargetLabel ?? fileConfig.target?.label ?? defaultTargetLabel,
+    type: targetType,
+  };
+  const connectUrl = cli.connectUrl ?? process.env.OPENWORK_CONNECT_URL ?? fileConfig.connectUrl;
+
   return {
     host,
     port: Number.isNaN(port) ? DEFAULT_PORT : port,
@@ -277,5 +336,8 @@ export async function resolveServerConfig(cli: CliArgs): Promise<ServerConfig> {
     startedAt: Date.now(),
     tokenSource,
     hostTokenSource,
+    target,
+    connectUrl: connectUrl?.trim() || undefined,
+    opencodeConnectUrl: opencodeConnectUrl?.trim() || undefined,
   };
 }

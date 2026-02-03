@@ -18,6 +18,7 @@ import type {
   View,
   WorkspaceCommand,
   WorkspaceDisplay,
+  TargetProfile,
 } from "../types";
 
 import type { WorkspaceInfo } from "../lib/tauri";
@@ -27,9 +28,10 @@ import { ArrowRight, ChevronDown, HardDrive, Shield, Zap } from "lucide-solid";
 import Button from "../components/button";
 import RenameSessionModal from "../components/rename-session-modal";
 import WorkspaceChip from "../components/workspace-chip";
+import SandboxChip from "../components/sandbox-chip";
 import ProviderAuthModal from "../components/provider-auth-modal";
 import StatusBar from "../components/status-bar";
-import type { OpenworkServerStatus } from "../lib/openwork-server";
+import type { OpenworkSandboxInfo, OpenworkServerStatus, OpenworkTargetInfo } from "../lib/openwork-server";
 import { join } from "@tauri-apps/api/path";
 import browserSetupCommandTemplate from "../data/commands/browser-setup.md?raw";
 import { opencodeCommandWrite } from "../lib/tauri";
@@ -50,6 +52,8 @@ export type SessionViewProps = {
   activeWorkspaceRoot: string;
   workspaces: WorkspaceInfo[];
   activeWorkspaceId: string;
+  activeSandbox: OpenworkSandboxInfo | null;
+  activeTargetInfo: OpenworkTargetInfo | null;
   connectingWorkspaceId: string | null;
   activateWorkspace: (workspaceId: string) => Promise<boolean> | boolean | void;
   setWorkspaceSearch: (value: string) => void;
@@ -128,6 +132,9 @@ export type SessionViewProps = {
   commandRegistryItems: () => CommandRegistryItem[];
   registerCommand: (command: CommandRegistryItem) => () => void;
   deleteSession: (sessionId: string) => Promise<void>;
+  targetOptions: TargetProfile[];
+  activeTargetId: string;
+  onSelectTarget: (targetId: string) => void | Promise<void>;
 };
 
 type SessionSummary = { id: string; title: string; slug?: string | null };
@@ -1302,11 +1309,23 @@ export default function SessionView(props: SessionViewProps) {
               <ArrowRight class="rotate-180 w-5 h-5" />
               <span class="hidden md:inline text-xs">Back</span>
             </Button>
-              <WorkspaceChip
-                workspace={props.activeWorkspaceDisplay}
-                connecting={props.connectingWorkspaceId === props.activeWorkspaceDisplay.id}
-                onClick={openWorkspacePicker}
-              />
+              <Show
+                when={props.activeSandbox || props.activeTargetInfo}
+                fallback={
+                  <WorkspaceChip
+                    workspace={props.activeWorkspaceDisplay}
+                    connecting={props.connectingWorkspaceId === props.activeWorkspaceDisplay.id}
+                    onClick={openWorkspacePicker}
+                  />
+                }
+              >
+                <SandboxChip
+                  sandbox={props.activeSandbox}
+                  target={props.activeTargetInfo}
+                  connecting={props.connectingWorkspaceId === props.activeWorkspaceDisplay.id}
+                  onClick={openWorkspacePicker}
+                />
+              </Show>
              <Show when={props.developerMode}>
                <span class="text-xs text-gray-7">{props.headerStatus}</span>
              </Show>
@@ -1547,6 +1566,9 @@ export default function SessionView(props: SessionViewProps) {
           isRemoteWorkspace={props.activeWorkspaceDisplay.workspaceType === "remote"}
           attachmentsEnabled={attachmentsEnabled()}
           attachmentsDisabledReason={attachmentsDisabledReason()}
+          targetOptions={props.targetOptions}
+          activeTargetId={props.activeTargetId}
+          onSelectTarget={props.onSelectTarget}
         />
 
         <Show when={unreadCount() > 0}>

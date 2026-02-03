@@ -284,6 +284,27 @@ export type WorkspaceDisplay = WorkspaceInfo & {
   name: string;
 };
 
+export type TargetProfile = {
+  id: string;
+  label: string;
+  type: "local" | "remote";
+  baseUrl?: string | null;
+  token?: string | null;
+  lastUsedAt?: number | null;
+  status?: "online" | "offline" | "unknown";
+};
+
+export type SandboxSummary = {
+  id: string;
+  name: string;
+  targetId: string;
+  path: string;
+  createdAt: number;
+  updatedAt: number;
+  status: "active" | "idle" | "archived";
+  sizeBytes?: number;
+};
+
 export type UpdateHandle = {
   available: boolean;
   currentVersion: string;

@@ -17,7 +17,7 @@ if (args.version) {
 }
 
 const config = await resolveServerConfig(args);
-const server = startServer(config);
+const server = await startServer(config);
 
 const url = `http://${config.host}:${server.port}`;
 console.log(`OpenWork server listening on ${url}`);

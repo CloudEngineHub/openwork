@@ -122,6 +122,7 @@ import { createSessionStore } from "./context/session";
 import { createExtensionsStore } from "./context/extensions";
 import { useGlobalSync } from "./context/global-sync";
 import { createWorkspaceStore } from "./context/workspace";
+import { createTargetStore, LocalTarget } from "./context/targets";
 import {
   updaterEnvironment,
   readOpencodeConfig,
@@ -1319,6 +1320,25 @@ export default function App() {
     openworkServerClient,
     onEngineStable: () => setReloadLastFinishedAtRef(Date.now()),
     engineRuntime,
+  });
+
+  const targetStore = createTargetStore();
+  const targetOptions = createMemo(() => [LocalTarget, ...targetStore.targets()]);
+  const activeTargetId = createMemo(() => targetStore.activeTargetId());
+  const defaultTargetId = createMemo(() => targetStore.defaultTargetId());
+  const activeSandbox = createMemo(() => {
+    const sandboxId = workspaceStore.activeSandboxId();
+    if (!sandboxId) return null;
+    return workspaceStore.sandboxes().find((sandbox) => sandbox.id === sandboxId) ?? null;
+  });
+  const activeTargetInfo = createMemo(() => workspaceStore.activeTargetInfo());
+
+  createEffect(() => {
+    const info = workspaceStore.activeTargetInfo();
+    if (!info) return;
+    if (info.type === "local") {
+      targetStore.setActiveTarget(LocalTarget.id);
+    }
   });
 
   createEffect(() => {
@@ -3236,6 +3256,38 @@ export default function App() {
     }
   }
 
+  const [targetSwitching, setTargetSwitching] = createSignal(false);
+
+  const handleSelectTarget = async (targetId: string) => {
+    if (targetSwitching()) return;
+    const target = targetOptions().find((option) => option.id === targetId);
+    if (!target) return;
+    if (targetStore.activeTargetId() === targetId) return;
+
+    setTargetSwitching(true);
+    try {
+      targetStore.setActiveTarget(targetId);
+      if (target.type === "remote") {
+        updateOpenworkServerSettings({
+          ...openworkServerSettings(),
+          urlOverride: target.baseUrl ?? "",
+          token: target.token ?? undefined,
+        });
+        setStartupPreference("server");
+        targetStore.updateTarget(targetId, { lastUsedAt: Date.now() });
+      } else {
+        setStartupPreference("local");
+      }
+
+      const ok = await workspaceStore.createSandbox({ source: "base" });
+      if (ok) {
+        await createSessionAndOpen();
+      }
+    } finally {
+      setTargetSwitching(false);
+    }
+  };
+
 
   onMount(async () => {
     const startupPref = readStartupPreference();
@@ -3982,6 +4034,14 @@ export default function App() {
     openwrkStatus: openwrkStatusState(),
     owpenbotInfo: owpenbotInfoState(),
     engineDoctorVersion: workspaceStore.engineDoctorResult()?.version ?? null,
+    targets: targetOptions(),
+    activeTargetId: activeTargetId(),
+    defaultTargetId: defaultTargetId(),
+    addTarget: targetStore.addTarget,
+    updateTarget: targetStore.updateTarget,
+    removeTarget: targetStore.removeTarget,
+    setDefaultTarget: targetStore.setDefaultTarget,
+    setActiveTarget: handleSelectTarget,
     updateOpenworkServerSettings,
     resetOpenworkServerSettings,
     testOpenworkServerConnection,
@@ -3996,6 +4056,11 @@ export default function App() {
     setWorkspacePickerOpen: workspaceStore.setWorkspacePickerOpen,
     connectingWorkspaceId: workspaceStore.connectingWorkspaceId(),
     workspaces: workspaceStore.workspaces(),
+    sandboxes: workspaceStore.sandboxes(),
+    activeSandboxId: workspaceStore.activeSandboxId(),
+    createSandbox: workspaceStore.createSandbox,
+    activateSandbox: workspaceStore.activateSandbox,
+    archiveSandbox: workspaceStore.archiveSandbox,
     filteredWorkspaces: workspaceStore.filteredWorkspaces(),
     activeWorkspaceId: workspaceStore.activeWorkspaceId(),
     activateWorkspace: workspaceStore.activateWorkspace,
@@ -4180,6 +4245,8 @@ export default function App() {
     activeWorkspaceRoot: workspaceStore.activeWorkspaceRoot().trim(),
     workspaces: workspaceStore.workspaces(),
     activeWorkspaceId: workspaceStore.activeWorkspaceId(),
+    activeSandbox: activeSandbox(),
+    activeTargetInfo: activeTargetInfo(),
     connectingWorkspaceId: workspaceStore.connectingWorkspaceId(),
     activateWorkspace: workspaceStore.activateWorkspace,
     setWorkspaceSearch: workspaceStore.setWorkspaceSearch,
@@ -4246,6 +4313,9 @@ export default function App() {
     providers: providers(),
     providerConnectedIds: providerConnectedIds(),
     listAgents: listAgents,
+    targetOptions: targetOptions(),
+    activeTargetId: activeTargetId(),
+    onSelectTarget: handleSelectTarget,
     selectedSessionAgent: selectedSessionAgent(),
     setSessionAgent: setSessionAgent,
     saveSession: saveSessionExport,

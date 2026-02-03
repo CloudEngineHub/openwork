@@ -22,6 +22,9 @@ export type OpenworkServerDiagnostics = {
   workspaceCount: number;
   activeWorkspaceId: string | null;
   workspace: OpenworkWorkspaceInfo | null;
+  sandboxCount?: number;
+  activeSandboxId?: string | null;
+  sandbox?: { id: string; name: string; path: string; status: string } | null;
   authorizedRoots: string[];
   server: { host: string; port: number; configPath?: string | null };
   tokenSource: { client: string; host: string };
@@ -51,6 +54,51 @@ export type OpenworkWorkspaceInfo = {
 export type OpenworkWorkspaceList = {
   items: OpenworkWorkspaceInfo[];
   activeId?: string | null;
+};
+
+export type OpenworkTargetInfo = {
+  id: string;
+  label: string;
+  type: "local" | "remote";
+};
+
+export type OpenworkSandboxInfo = {
+  id: string;
+  name: string;
+  targetId: string;
+  baseWorkspaceId: string;
+  path: string;
+  createdAt: number;
+  updatedAt: number;
+  status: "active" | "idle" | "archived";
+  sizeBytes?: number;
+};
+
+export type OpenworkSandboxList = {
+  items: OpenworkSandboxInfo[];
+  activeId?: string | null;
+};
+
+export type OpenworkConnectDescriptor = {
+  updatedAt: number;
+  sandbox: { id: string; name: string; path: string; status: string } | null;
+  target: OpenworkTargetInfo;
+  opencode: {
+    baseUrl?: string;
+    connectUrl?: string;
+    directory?: string;
+    username?: string;
+    password?: string;
+    port?: number;
+  };
+  openwork: {
+    baseUrl: string;
+    connectUrl: string;
+    token: string;
+    hostToken: string;
+    port: number;
+  };
+  owpenbot: { healthUrl: string; healthPort: number };
 };
 
 export type OpenworkPluginItem = {
@@ -294,6 +342,38 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
       requestJson<{ ok: boolean; version: string; uptimeMs: number }>(baseUrl, "/health", { token, hostToken }),
     status: () => requestJson<OpenworkServerDiagnostics>(baseUrl, "/status", { token, hostToken }),
     capabilities: () => requestJson<OpenworkServerCapabilities>(baseUrl, "/capabilities", { token, hostToken }),
+    connectActive: () => requestJson<OpenworkConnectDescriptor>(baseUrl, "/connect/active", { token, hostToken }),
+    listSandboxes: () => requestJson<OpenworkSandboxList>(baseUrl, "/sandboxes", { token, hostToken }),
+    createSandbox: (payload: { name?: string | null; source?: "base" | "sandbox"; fromSandboxId?: string | null }) =>
+      requestJson<{ activeId: string; sandbox: OpenworkSandboxInfo }>(baseUrl, "/sandboxes", {
+        token,
+        hostToken,
+        method: "POST",
+        body: payload,
+      }),
+    getSandbox: (sandboxId: string) =>
+      requestJson<{ sandbox: OpenworkSandboxInfo }>(baseUrl, `/sandboxes/${encodeURIComponent(sandboxId)}`, {
+        token,
+        hostToken,
+      }),
+    archiveSandbox: (sandboxId: string) =>
+      requestJson<{ sandbox: OpenworkSandboxInfo }>(baseUrl, `/sandboxes/${encodeURIComponent(sandboxId)}/archive`, {
+        token,
+        hostToken,
+        method: "POST",
+      }),
+    deleteSandbox: (sandboxId: string) =>
+      requestJson<{ deleted: boolean; sandbox: OpenworkSandboxInfo }>(baseUrl, `/sandboxes/${encodeURIComponent(sandboxId)}/delete`, {
+        token,
+        hostToken,
+        method: "POST",
+      }),
+    activateSandbox: (sandboxId: string) =>
+      requestJson<{ activeId: string; sandbox: OpenworkSandboxInfo }>(baseUrl, `/sandboxes/${encodeURIComponent(sandboxId)}/activate`, {
+        token,
+        hostToken,
+        method: "POST",
+      }),
     listWorkspaces: () => requestJson<OpenworkWorkspaceList>(baseUrl, "/workspaces", { token, hostToken }),
     activateWorkspace: (workspaceId: string) =>
       requestJson<{ activeId: string; workspace: OpenworkWorkspaceInfo }>(

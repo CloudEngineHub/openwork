@@ -1,7 +1,16 @@
 import { readFile, writeFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import type { ApprovalRequest, Capabilities, ServerConfig, WorkspaceInfo, Actor, ReloadReason, ReloadTrigger } from "./types.js";
+import type {
+  ApprovalRequest,
+  Capabilities,
+  ServerConfig,
+  WorkspaceInfo,
+  Actor,
+  ReloadReason,
+  ReloadTrigger,
+  SandboxInfo,
+} from "./types.js";
 import { ApprovalService } from "./approvals.js";
 import { addPlugin, listPlugins, normalizePluginSpec, removePlugin } from "./plugins.js";
 import { addMcp, listMcp, removeMcp } from "./mcp.js";
@@ -16,6 +25,20 @@ import { parseFrontmatter } from "./frontmatter.js";
 import { opencodeConfigPath, openworkConfigPath, projectCommandsDir, projectSkillsDir } from "./workspace-files.js";
 import { ensureDir, exists, hashToken, shortId } from "./utils.js";
 import { sanitizeCommandName } from "./validators.js";
+import {
+  archiveSandbox,
+  createSandbox,
+  deleteSandbox,
+  deriveSandboxStatus,
+  ensureSandboxRootsAuthorized,
+  getSandbox,
+  listSandboxes,
+  loadSandboxStore,
+  readSandboxSize,
+  setActiveSandbox,
+  syncSandboxStatuses,
+  type SandboxStore,
+} from "./sandboxes.js";
 import pkg from "../package.json" with { type: "json" };
 
 const SERVER_VERSION = pkg.version;
@@ -38,12 +61,21 @@ interface RequestContext {
   approvals: ApprovalService;
   reloadEvents: ReloadEventStore;
   actor?: Actor;
+  sandboxes?: SandboxStore | null;
 }
 
-export function startServer(config: ServerConfig) {
+export async function startServer(config: ServerConfig) {
   const approvals = new ApprovalService(config.approval);
   const reloadEvents = new ReloadEventStore();
-  const routes = createRoutes(config, approvals);
+  const baseWorkspace = config.workspaces[0] ?? null;
+  const sandboxStore = baseWorkspace
+    ? await loadSandboxStore(baseWorkspace, config.target)
+    : null;
+  if (sandboxStore) {
+    syncSandboxStatuses(sandboxStore);
+    applySandboxState(config, sandboxStore);
+  }
+  const routes = createRoutes(config, approvals, sandboxStore);
 
   const serverOptions: {
     hostname: string;
@@ -86,6 +118,7 @@ export function startServer(config: ServerConfig) {
           approvals,
           reloadEvents,
           actor,
+          sandboxes: sandboxStore,
         });
         return withCors(response, request, config);
       } catch (error) {
@@ -284,7 +317,7 @@ function serializeWorkspace(workspace: ServerConfig["workspaces"][number]) {
   };
 }
 
-function createRoutes(config: ServerConfig, approvals: ApprovalService): Route[] {
+function createRoutes(config: ServerConfig, approvals: ApprovalService, sandboxStore: SandboxStore | null): Route[] {
   const routes: Route[] = [];
 
   addRoute(routes, "GET", "/health", "none", async () => {
@@ -293,6 +326,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService): Route[]
 
   addRoute(routes, "GET", "/status", "client", async () => {
     const active = config.workspaces[0];
+    const activeSandbox = sandboxStore ? getSandbox(sandboxStore, sandboxStore.state.activeId) : null;
     return jsonResponse({
       ok: true,
       version: SERVER_VERSION,
@@ -303,6 +337,16 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService): Route[]
       workspaceCount: config.workspaces.length,
       activeWorkspaceId: active?.id ?? null,
       workspace: active ? serializeWorkspace(active) : null,
+      sandboxCount: sandboxStore ? sandboxStore.state.sandboxes.length : 0,
+      activeSandboxId: activeSandbox?.id ?? null,
+      sandbox: activeSandbox
+        ? {
+            id: activeSandbox.id,
+            name: activeSandbox.name,
+            path: activeSandbox.path,
+            status: activeSandbox.status,
+          }
+        : null,
       authorizedRoots: config.authorizedRoots,
       server: {
         host: config.host,
@@ -318,6 +362,153 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService): Route[]
 
   addRoute(routes, "GET", "/capabilities", "client", async () => {
     return jsonResponse(buildCapabilities(config));
+  });
+
+  addRoute(routes, "GET", "/connect/active", "client", async () => {
+    const activeSandbox = sandboxStore ? getSandbox(sandboxStore, sandboxStore.state.activeId) : null;
+    const activeWorkspace = activeSandbox
+      ? ({
+          id: activeSandbox.id,
+          name: activeSandbox.name,
+          path: activeSandbox.path,
+          workspaceType: "local",
+          baseUrl: config.workspaces[0]?.baseUrl,
+          directory: activeSandbox.path,
+          opencodeUsername: config.workspaces[0]?.opencodeUsername,
+          opencodePassword: config.workspaces[0]?.opencodePassword,
+        } as WorkspaceInfo)
+      : config.workspaces[0];
+    const opencodeBaseUrl = activeWorkspace?.baseUrl?.trim() ?? "";
+    const opencodeDirectory = activeWorkspace ? resolveOpencodeDirectory(activeWorkspace) : null;
+    const opencodePort = opencodeBaseUrl ? parseUrlPort(opencodeBaseUrl) : null;
+    const openworkBaseUrl = `http://${config.host}:${config.port}`;
+    const opencodeProxyUrl = `${openworkBaseUrl.replace(/\/$/, "")}/opencode`;
+    const opencodeConnectUrl = config.opencodeConnectUrl ?? opencodeProxyUrl ?? opencodeBaseUrl;
+    const owpenbotPort = resolveOwpenbotHealthPort();
+    return jsonResponse({
+      updatedAt: Date.now(),
+      sandbox: activeSandbox
+        ? {
+            id: activeSandbox.id,
+            name: activeSandbox.name,
+            path: activeSandbox.path,
+            status: deriveSandboxStatus(activeSandbox, sandboxStore?.state.activeId),
+          }
+        : null,
+      target: config.target,
+      opencode: {
+        baseUrl: opencodeBaseUrl || undefined,
+        connectUrl: opencodeConnectUrl || undefined,
+        directory: opencodeDirectory ?? undefined,
+        username: activeWorkspace?.opencodeUsername ?? undefined,
+        password: activeWorkspace?.opencodePassword ?? undefined,
+        port: opencodePort ?? undefined,
+      },
+      openwork: {
+        baseUrl: openworkBaseUrl,
+        connectUrl: config.connectUrl ?? openworkBaseUrl,
+        token: config.token,
+        hostToken: config.hostToken,
+        port: config.port,
+      },
+      owpenbot: {
+        healthUrl: `http://127.0.0.1:${owpenbotPort}`,
+        healthPort: owpenbotPort,
+      },
+    });
+  });
+
+  addRoute(routes, "GET", "/sandboxes", "client", async () => {
+    if (!sandboxStore) {
+      throw new ApiError(400, "sandbox_unavailable", "Sandboxes unavailable without a base workspace");
+    }
+    const items = listSandboxes(sandboxStore);
+    return jsonResponse({
+      activeId: sandboxStore.state.activeId,
+      items,
+    });
+  });
+
+  addRoute(routes, "POST", "/sandboxes", "client", async (ctx) => {
+    ensureWritable(config);
+    if (!sandboxStore) {
+      throw new ApiError(400, "sandbox_unavailable", "Sandboxes unavailable without a base workspace");
+    }
+    const body = await readJsonBody(ctx.request);
+    const name = typeof body.name === "string" ? body.name.trim() : null;
+    const source = typeof body.source === "string" ? body.source : "base";
+    const fromSandboxId = typeof body.fromSandboxId === "string" ? body.fromSandboxId : null;
+    const mode = source === "sandbox" ? "sandbox" : "base";
+    const sandbox = await createSandbox(sandboxStore, {
+      name,
+      source: { type: mode, id: fromSandboxId ?? sandboxStore.state.activeId },
+    });
+    syncSandboxStatuses(sandboxStore);
+    applySandboxState(config, sandboxStore);
+    return jsonResponse({ activeId: sandboxStore.state.activeId, sandbox });
+  });
+
+  addRoute(routes, "GET", "/sandboxes/:id", "client", async (ctx) => {
+    if (!sandboxStore) {
+      throw new ApiError(400, "sandbox_unavailable", "Sandboxes unavailable without a base workspace");
+    }
+    const sandbox = getSandbox(sandboxStore, ctx.params.id);
+    if (!sandbox) {
+      throw new ApiError(404, "sandbox_not_found", "Sandbox not found");
+    }
+    const sizeBytes = await readSandboxSize(sandboxStore, sandbox);
+    return jsonResponse({
+      sandbox: {
+        ...sandbox,
+        status: deriveSandboxStatus(sandbox, sandboxStore.state.activeId),
+        sizeBytes,
+      },
+    });
+  });
+
+  addRoute(routes, "POST", "/sandboxes/:id/archive", "client", async (ctx) => {
+    ensureWritable(config);
+    if (!sandboxStore) {
+      throw new ApiError(400, "sandbox_unavailable", "Sandboxes unavailable without a base workspace");
+    }
+    try {
+      const sandbox = await archiveSandbox(sandboxStore, ctx.params.id);
+      syncSandboxStatuses(sandboxStore);
+      applySandboxState(config, sandboxStore);
+      return jsonResponse({ sandbox });
+    } catch (error) {
+      throw new ApiError(400, "sandbox_archive_failed", error instanceof Error ? error.message : "Archive failed");
+    }
+  });
+
+  addRoute(routes, "POST", "/sandboxes/:id/delete", "client", async (ctx) => {
+    ensureWritable(config);
+    if (!sandboxStore) {
+      throw new ApiError(400, "sandbox_unavailable", "Sandboxes unavailable without a base workspace");
+    }
+    try {
+      const sandbox = await deleteSandbox(sandboxStore, ctx.params.id);
+      syncSandboxStatuses(sandboxStore);
+      applySandboxState(config, sandboxStore);
+      return jsonResponse({ deleted: true, sandbox });
+    } catch (error) {
+      throw new ApiError(400, "sandbox_delete_failed", error instanceof Error ? error.message : "Delete failed");
+    }
+  });
+
+  addRoute(routes, "POST", "/sandboxes/:id/activate", "client", async (ctx) => {
+    ensureWritable(config);
+    if (!sandboxStore) {
+      throw new ApiError(400, "sandbox_unavailable", "Sandboxes unavailable without a base workspace");
+    }
+    try {
+      const sandbox = await setActiveSandbox(sandboxStore, ctx.params.id);
+      syncSandboxStatuses(sandboxStore);
+      applySandboxState(config, sandboxStore);
+      return jsonResponse({ activeId: sandboxStore.state.activeId, sandbox });
+    } catch (error) {
+      throw new ApiError(400, "sandbox_activate_failed", error instanceof Error ? error.message : "Activate failed");
+    }
   });
 
   addRoute(routes, "GET", "/workspaces", "client", async () => {
@@ -797,6 +988,55 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService): Route[]
   });
 
   return routes;
+}
+
+function applySandboxState(config: ServerConfig, store: SandboxStore) {
+  const baseWorkspace = config.workspaces.find((entry) => entry.id === store.baseWorkspace.id) ?? store.baseWorkspace;
+  const sandboxEntries: WorkspaceInfo[] = store.state.sandboxes.map((sandbox) => ({
+    id: sandbox.id,
+    name: sandbox.name,
+    path: sandbox.path,
+    workspaceType: baseWorkspace.workspaceType,
+    baseUrl: baseWorkspace.baseUrl,
+    directory: sandbox.path,
+    opencodeUsername: baseWorkspace.opencodeUsername,
+    opencodePassword: baseWorkspace.opencodePassword,
+  }));
+  const byId = new Map<string, WorkspaceInfo>();
+  for (const entry of config.workspaces) {
+    byId.set(entry.id, entry);
+  }
+  for (const entry of sandboxEntries) {
+    const existing = byId.get(entry.id);
+    byId.set(entry.id, { ...existing, ...entry });
+  }
+  let merged = Array.from(byId.values());
+  const activeId = store.state.activeId;
+  if (activeId) {
+    merged = [
+      ...merged.filter((entry) => entry.id === activeId),
+      ...merged.filter((entry) => entry.id !== activeId),
+    ];
+  }
+  config.workspaces = merged;
+  config.authorizedRoots = ensureSandboxRootsAuthorized(
+    config.authorizedRoots,
+    store.state.sandboxes.map((sandbox) => sandbox.path),
+  );
+}
+
+function parseUrlPort(value: string): number | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.port) {
+      const port = Number(url.port);
+      return Number.isFinite(port) ? port : null;
+    }
+    return url.protocol === "https:" ? 443 : 80;
+  } catch {
+    return null;
+  }
 }
 
 async function resolveWorkspace(config: ServerConfig, id: string): Promise<WorkspaceInfo> {

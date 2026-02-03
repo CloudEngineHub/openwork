@@ -1,8 +1,8 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowRight, AtSign, ChevronDown, File, Paperclip, X, Zap } from "lucide-solid";
+import { ArrowRight, AtSign, ChevronDown, File, HardDrive, Paperclip, X, Zap } from "lucide-solid";
 
-import type { ComposerAttachment, ComposerDraft, ComposerPart, PromptMode } from "../../types";
+import type { ComposerAttachment, ComposerDraft, ComposerPart, PromptMode, TargetProfile } from "../../types";
 
 export type CommandItem = {
   id: string;
@@ -55,6 +55,9 @@ type ComposerProps = {
   isRemoteWorkspace: boolean;
   attachmentsEnabled: boolean;
   attachmentsDisabledReason: string | null;
+  targetOptions: TargetProfile[];
+  activeTargetId: string;
+  onSelectTarget: (targetId: string) => void | Promise<void>;
 };
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -276,8 +279,14 @@ export default function Composer(props: ComposerProps) {
   const [historyIndex, setHistoryIndex] = createSignal({ prompt: -1, shell: -1 });
   const [history, setHistory] = createSignal({ prompt: [] as ComposerDraft[], shell: [] as ComposerDraft[] });
   const [variantMenuOpen, setVariantMenuOpen] = createSignal(false);
+  const [targetPickerOpen, setTargetPickerOpen] = createSignal(false);
+  let targetPickerRef: HTMLDivElement | undefined;
   const activeVariant = createMemo(() => props.modelVariant ?? "none");
   const attachmentsDisabled = createMemo(() => !props.attachmentsEnabled);
+  const activeTarget = createMemo(() => {
+    const current = props.targetOptions.find((option) => option.id === props.activeTargetId);
+    return current ?? props.targetOptions[0] ?? null;
+  });
 
   onMount(() => {
     queueMicrotask(() => focusEditorEnd());
@@ -817,6 +826,17 @@ export default function Composer(props: ComposerProps) {
   });
 
   createEffect(() => {
+    if (!targetPickerOpen()) return;
+    const handler = (event: MouseEvent) => {
+      if (!targetPickerRef) return;
+      if (targetPickerRef.contains(event.target as Node)) return;
+      setTargetPickerOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    onCleanup(() => window.removeEventListener("mousedown", handler));
+  });
+
+  createEffect(() => {
     const handler = () => {
       editorRef?.focus();
     };
@@ -1079,7 +1099,7 @@ export default function Composer(props: ComposerProps) {
                       class="bg-transparent border-none p-0 pb-12 pr-20 text-gray-12 focus:ring-0 text-[15px] leading-relaxed resize-none min-h-[24px] outline-none relative z-10"
                     />
 
-                    <div class="mt-3" ref={props.setAgentPickerRef}>
+                    <div class="mt-3 flex flex-wrap items-center gap-2" ref={props.setAgentPickerRef}>
                       <button
                         type="button"
                         class="flex items-center gap-2 pl-3 pr-2 py-1.5 bg-gray-1/70 border border-gray-6 rounded-lg hover:border-gray-7 hover:bg-gray-3 transition-all group"
@@ -1153,6 +1173,66 @@ export default function Composer(props: ComposerProps) {
                           <div class="border-t border-gray-6/40 px-4 py-2 text-[10px] text-gray-9">
                             Tip: use /agent-next or /agent-prev to cycle.
                           </div>
+                        </div>
+                      </Show>
+
+                      <Show when={props.targetOptions.length}>
+                        <div class="relative" ref={(el) => (targetPickerRef = el)}>
+                          <button
+                            type="button"
+                            class="flex items-center gap-2 pl-3 pr-2 py-1.5 bg-gray-1/70 border border-gray-6 rounded-lg hover:border-gray-7 hover:bg-gray-3 transition-all group"
+                            onClick={() => setTargetPickerOpen((open) => !open)}
+                            aria-expanded={targetPickerOpen()}
+                          >
+                            <div class="p-1 rounded bg-gray-4 text-gray-10">
+                              <HardDrive size={14} />
+                            </div>
+                            <div class="flex flex-col items-start mr-2 min-w-0">
+                              <span class="text-xs font-medium text-gray-12 leading-none truncate max-w-[10rem]">
+                                {activeTarget()?.label ?? "Run on"}
+                              </span>
+                              <span class="text-[10px] text-gray-10 font-mono leading-none">
+                                {activeTarget()?.type === "remote" ? "Remote" : "Local"}
+                              </span>
+                            </div>
+                            <ChevronDown size={14} class="text-gray-10 group-hover:text-gray-11" />
+                          </button>
+
+                          <Show when={targetPickerOpen()}>
+                            <div class="absolute left-0 bottom-full mb-2 w-64 rounded-2xl border border-gray-6 bg-gray-1/95 shadow-2xl backdrop-blur-md overflow-hidden">
+                              <div class="px-4 pt-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-8 border-b border-gray-6/30">
+                                Run on
+                              </div>
+                              <div class="max-h-64 overflow-auto p-2 space-y-1">
+                                <For each={props.targetOptions}>
+                                  {(target) => (
+                                    <button
+                                      type="button"
+                                      class={`w-full flex items-center justify-between rounded-xl px-3 py-2 text-left text-xs transition-colors ${
+                                        props.activeTargetId === target.id
+                                          ? "bg-gray-12/10 text-gray-12"
+                                          : "text-gray-11 hover:bg-gray-12/5"
+                                      }`}
+                                      onClick={() => {
+                                        props.onSelectTarget(target.id);
+                                        setTargetPickerOpen(false);
+                                      }}
+                                    >
+                                      <div class="min-w-0">
+                                        <div class="truncate">{target.label}</div>
+                                        <div class="text-[10px] text-gray-9">
+                                          {target.type === "remote" ? "Remote" : "Local"}
+                                        </div>
+                                      </div>
+                                      <Show when={props.activeTargetId === target.id}>
+                                        <span class="text-[10px] uppercase tracking-wider text-gray-9">Active</span>
+                                      </Show>
+                                    </button>
+                                  )}
+                                </For>
+                              </div>
+                            </div>
+                          </Show>
                         </div>
                       </Show>
                     </div>

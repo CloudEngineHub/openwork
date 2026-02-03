@@ -1,4 +1,4 @@
-import { createMemo, createSignal } from "solid-js";
+import { createEffect, createMemo, createSignal } from "solid-js";
 
 import type {
   Client,
@@ -26,6 +26,9 @@ import {
   type OpenworkServerClient,
   type OpenworkServerSettings,
   type OpenworkWorkspaceInfo,
+  type OpenworkSandboxInfo,
+  type OpenworkConnectDescriptor,
+  type OpenworkTargetInfo,
 } from "../lib/openwork-server";
 import { downloadDir, homeDir } from "@tauri-apps/api/path";
 import {
@@ -120,6 +123,9 @@ export function createWorkspaceStore(options: {
   const [projectDir, setProjectDir] = createSignal("");
   const [workspaces, setWorkspaces] = createSignal<WorkspaceInfo[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = createSignal<string>("starter");
+  const [sandboxes, setSandboxes] = createSignal<OpenworkSandboxInfo[]>([]);
+  const [activeSandboxId, setActiveSandboxId] = createSignal<string | null>(null);
+  const [activeTargetInfo, setActiveTargetInfo] = createSignal<OpenworkTargetInfo | null>(null);
 
   const syncActiveWorkspaceId = (id: string) => {
     setActiveWorkspaceId(id);
@@ -188,6 +194,184 @@ export function createWorkspaceStore(options: {
       return haystack.includes(query);
     });
   });
+
+  const isSandboxWorkspace = (workspace: WorkspaceInfo | null) => {
+    if (!workspace) return false;
+    if (workspace.openworkWorkspaceId) return true;
+    const path = workspace.path?.replace(/\\/g, "/") ?? "";
+    const directory = workspace.directory?.replace(/\\/g, "/") ?? "";
+    return path.includes("/.openwork/sandboxes/") || directory.includes("/.openwork/sandboxes/");
+  };
+
+  const mapSandboxToWorkspace = (
+    sandbox: OpenworkSandboxInfo,
+    targetType: "local" | "remote",
+    openworkBaseUrl: string,
+  ): WorkspaceInfo => {
+    const isRemote = targetType === "remote";
+    return {
+      id: sandbox.id,
+      name: sandbox.name,
+      path: sandbox.path,
+      preset: "starter",
+      workspaceType: isRemote ? "remote" : "local",
+      remoteType: isRemote ? "openwork" : "opencode",
+      baseUrl: isRemote ? openworkBaseUrl : undefined,
+      directory: isRemote ? sandbox.path : undefined,
+      displayName: sandbox.name,
+      openworkHostUrl: isRemote ? openworkBaseUrl : undefined,
+      openworkWorkspaceId: sandbox.id,
+      openworkWorkspaceName: sandbox.name,
+    };
+  };
+
+  const descriptorAuth = (descriptor: OpenworkConnectDescriptor) => {
+    const username = descriptor.opencode.username?.trim() ?? "";
+    const password = descriptor.opencode.password?.trim() ?? "";
+    if (username && password) return { username, password } as OpencodeAuth;
+    if (descriptor.openwork?.token) {
+      return { token: descriptor.openwork.token, mode: "openwork" } as OpencodeAuth;
+    }
+    return undefined;
+  };
+
+  const refreshSandboxes = async () => {
+    const client = options.openworkServerClient?.();
+    if (!client) return;
+    try {
+      const response = await client.listSandboxes();
+      const items = Array.isArray(response.items) ? response.items : [];
+      setSandboxes(items);
+      const activeId = response.activeId ?? null;
+      setActiveSandboxId(activeId);
+      const targetType = activeTargetInfo()?.type ?? "local";
+      const mapped = items.map((sandbox) => mapSandboxToWorkspace(sandbox, targetType, client.baseUrl));
+      if (mapped.length) {
+        setWorkspaces(mapped);
+        if (activeId) {
+          syncActiveWorkspaceId(activeId);
+        }
+      }
+    } catch (error) {
+      console.warn("[workspace] sandbox refresh failed", error);
+    }
+  };
+
+  createEffect(() => {
+    const client = options.openworkServerClient?.();
+    if (!client) return;
+    void refreshSandboxes();
+  });
+
+  const connectUsingDescriptor = async (context?: { reason?: string; quiet?: boolean }) => {
+    const client = options.openworkServerClient?.();
+    if (!client) return false;
+    try {
+      const descriptor = await client.connectActive();
+      const opencodeUrl = descriptor.opencode.connectUrl ?? descriptor.opencode.baseUrl ?? "";
+      if (!opencodeUrl) {
+        options.setError("OpenCode URL missing from descriptor.");
+        return false;
+      }
+      const directory = descriptor.opencode.directory?.trim() ?? "";
+      const auth = descriptorAuth(descriptor);
+      setActiveTargetInfo(descriptor.target ?? null);
+      setActiveSandboxId(descriptor.sandbox?.id ?? null);
+      const ok = await connectToServer(
+        opencodeUrl,
+        directory || undefined,
+        {
+          workspaceId: descriptor.sandbox?.id ?? undefined,
+          workspaceType: descriptor.target?.type === "remote" ? "remote" : "local",
+          targetRoot: directory,
+          reason: context?.reason ?? "descriptor-connect",
+        },
+        auth,
+        { quiet: context?.quiet },
+      );
+      if (ok) {
+        if (directory) {
+          setProjectDir(directory);
+        }
+        await refreshSandboxes();
+      }
+      return ok;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : safeStringify(error);
+      options.setError(addOpencodeCacheHint(message));
+      return false;
+    }
+  };
+
+  const createSandbox = async (input: { name?: string | null; source?: "base" | "sandbox" }) => {
+    const client = options.openworkServerClient?.();
+    if (!client) return false;
+    options.setBusy(true);
+    options.setBusyLabel("status.creating_workspace");
+    options.setBusyStartedAt(Date.now());
+    try {
+      await client.createSandbox({
+        name: input.name ?? null,
+        source: input.source ?? "base",
+        fromSandboxId: input.source === "sandbox" ? activeSandboxId() : null,
+      });
+      const ok = await connectUsingDescriptor({ reason: "sandbox-create" });
+      return ok;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : safeStringify(error);
+      options.setError(addOpencodeCacheHint(message));
+      return false;
+    } finally {
+      options.setBusy(false);
+      options.setBusyLabel(null);
+      options.setBusyStartedAt(null);
+    }
+  };
+
+  const activateSandbox = async (sandboxId: string) => {
+    const client = options.openworkServerClient?.();
+    if (!client) return false;
+    setConnectingWorkspaceId(sandboxId);
+    try {
+      await client.activateSandbox(sandboxId);
+      const ok = await connectUsingDescriptor({ reason: "sandbox-activate", quiet: false });
+      return ok;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : safeStringify(error);
+      options.setError(addOpencodeCacheHint(message));
+      return false;
+    } finally {
+      setConnectingWorkspaceId(null);
+    }
+  };
+
+  const archiveSandbox = async (sandboxId: string) => {
+    const client = options.openworkServerClient?.();
+    if (!client) return false;
+    try {
+      await client.archiveSandbox(sandboxId);
+      await refreshSandboxes();
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : safeStringify(error);
+      options.setError(addOpencodeCacheHint(message));
+      return false;
+    }
+  };
+
+  const deleteSandbox = async (sandboxId: string) => {
+    const client = options.openworkServerClient?.();
+    if (!client) return false;
+    try {
+      await client.deleteSandbox(sandboxId);
+      await refreshSandboxes();
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : safeStringify(error);
+      options.setError(addOpencodeCacheHint(message));
+      return false;
+    }
+  };
 
   const resolveOpenworkHost = async (input: { hostUrl: string; token?: string | null }) => {
     const normalized = normalizeOpenworkServerUrl(input.hostUrl) ?? "";
@@ -366,6 +550,9 @@ export function createWorkspaceStore(options: {
 
     const next = workspaces().find((w) => w.id === id) ?? null;
     if (!next) return false;
+    if (isSandboxWorkspace(next)) {
+      return activateSandbox(next.openworkWorkspaceId ?? next.id);
+    }
     const isRemote = next.workspaceType === "remote";
     console.log("[workspace] activate", { id: next.id, type: next.workspaceType });
 
@@ -397,6 +584,7 @@ export function createWorkspaceStore(options: {
           let resolvedDirectory = next.directory?.trim() ?? "";
           let workspaceInfo: OpenworkWorkspaceInfo | null = null;
           let resolvedAuth: OpencodeAuth | undefined = undefined;
+          let connectedByDescriptor = false;
 
           try {
             const resolved = await resolveOpenworkHost({
@@ -422,20 +610,23 @@ export function createWorkspaceStore(options: {
             return false;
           }
 
-          const ok = await connectToServer(
-            resolvedBaseUrl,
-            resolvedDirectory || undefined,
-            {
-              workspaceId: next.id,
-              workspaceType: next.workspaceType,
-              targetRoot: resolvedDirectory ?? "",
-              reason: "workspace-switch-openwork",
-            },
-            resolvedAuth,
-          );
+          connectedByDescriptor = await connectUsingDescriptor({ reason: "workspace-switch-openwork" });
+          if (!connectedByDescriptor) {
+            const ok = await connectToServer(
+              resolvedBaseUrl,
+              resolvedDirectory || undefined,
+              {
+                workspaceId: next.id,
+                workspaceType: next.workspaceType,
+                targetRoot: resolvedDirectory ?? "",
+                reason: "workspace-switch-openwork",
+              },
+              resolvedAuth,
+            );
 
-          if (!ok) {
-            return false;
+            if (!ok) {
+              return false;
+            }
           }
 
           if (isTauriRuntime()) {
@@ -457,7 +648,9 @@ export function createWorkspaceStore(options: {
           }
 
           syncActiveWorkspaceId(id);
-          setProjectDir(resolvedDirectory || "");
+          if (!connectedByDescriptor) {
+            setProjectDir(resolvedDirectory || "");
+          }
           setWorkspaceConfig(null);
           setWorkspaceConfigLoaded(true);
           setAuthorizedDirs([]);
@@ -901,19 +1094,23 @@ export function createWorkspaceStore(options: {
       return false;
     }
 
-    const ok = await connectToServer(
-      resolvedBaseUrl,
-      resolvedDirectory || undefined,
-      {
-        workspaceType: "remote",
-        targetRoot: resolvedDirectory ?? "",
-        reason: "workspace-create-remote",
-      },
-      resolvedAuth,
-    );
+    let connectedByDescriptor = false;
+    connectedByDescriptor = await connectUsingDescriptor({ reason: "workspace-create-remote" });
+    if (!connectedByDescriptor) {
+      const ok = await connectToServer(
+        resolvedBaseUrl,
+        resolvedDirectory || undefined,
+        {
+          workspaceType: "remote",
+          targetRoot: resolvedDirectory ?? "",
+          reason: "workspace-create-remote",
+        },
+        resolvedAuth,
+      );
 
-    if (!ok) {
-      return false;
+      if (!ok) {
+        return false;
+      }
     }
 
     const finalDirectory = options.clientDirectory().trim() || resolvedDirectory || "";
@@ -959,7 +1156,9 @@ export function createWorkspaceStore(options: {
         syncActiveWorkspaceId(workspaceId);
       }
 
-      setProjectDir(finalDirectory);
+      if (!connectedByDescriptor) {
+        setProjectDir(finalDirectory);
+      }
       setWorkspaceConfig(null);
       setWorkspaceConfigLoaded(true);
       setAuthorizedDirs([]);
@@ -1705,6 +1904,9 @@ export function createWorkspaceStore(options: {
     projectDir,
     workspaces,
     activeWorkspaceId,
+    sandboxes,
+    activeSandboxId,
+    activeTargetInfo,
     authorizedDirs,
     newAuthorizedDir,
     workspaceConfig,
@@ -1733,14 +1935,20 @@ export function createWorkspaceStore(options: {
     syncActiveWorkspaceId: syncActiveWorkspaceId,
     refreshEngine,
     refreshEngineDoctor,
+    refreshSandboxes,
     activateWorkspace,
     connectToServer,
+    connectUsingDescriptor,
     createWorkspaceFlow,
     createRemoteWorkspaceFlow,
     forgetWorkspace,
     pickWorkspaceFolder,
     exportWorkspaceConfig,
     importWorkspaceConfig,
+    createSandbox,
+    activateSandbox,
+    archiveSandbox,
+    deleteSandbox,
     startHost,
     stopHost,
     reloadWorkspaceEngine,

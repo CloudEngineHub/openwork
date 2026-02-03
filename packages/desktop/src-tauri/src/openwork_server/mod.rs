@@ -60,6 +60,10 @@ pub fn start_openwork_server(
         .first()
         .map(|path| path.as_str())
         .unwrap_or("");
+    let (connect_url, mdns_url, lan_url) = build_urls(port);
+    let target_id = "tgt-local".to_string();
+    let target_label = "Local (this device)".to_string();
+    let target_type = "local".to_string();
 
     let (mut rx, child) = spawn_openwork_server(
         app,
@@ -77,6 +81,11 @@ pub fn start_openwork_server(
         opencode_username,
         opencode_password,
         owpenbot_health_port,
+        opencode_base_url,
+        connect_url.as_deref(),
+        Some(&target_id),
+        Some(&target_label),
+        Some(&target_type),
     )?;
 
     state.child = Some(child);
@@ -84,7 +93,6 @@ pub fn start_openwork_server(
     state.host = Some(host.clone());
     state.port = Some(port);
     state.base_url = Some(format!("http://127.0.0.1:{port}"));
-    let (connect_url, mdns_url, lan_url) = build_urls(port);
     state.connect_url = connect_url;
     state.mdns_url = mdns_url;
     state.lan_url = lan_url;

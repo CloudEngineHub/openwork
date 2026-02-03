@@ -6,7 +6,7 @@ import Button from "../components/button";
 import TextInput from "../components/text-input";
 import SettingsKeybinds, { type KeybindSetting } from "../components/settings-keybinds";
 import { HardDrive, MessageCircle, PlugZap, RefreshCcw, Shield, Smartphone, X } from "lucide-solid";
-import type { OpencodeConnectStatus, ProviderListItem, SettingsTab, StartupPreference } from "../types";
+import type { OpencodeConnectStatus, ProviderListItem, SettingsTab, StartupPreference, TargetProfile } from "../types";
 import { createOpenworkServerClient } from "../lib/openwork-server";
 import type {
   OpenworkAuditEntry,
@@ -127,6 +127,14 @@ export type SettingsViewProps = {
   notionBusy: boolean;
   connectNotion: () => void;
   engineDoctorVersion: string | null;
+  targets: TargetProfile[];
+  activeTargetId: string;
+  defaultTargetId: string | null;
+  addTarget: (input: { label: string; baseUrl: string; token?: string | null }) => TargetProfile | null;
+  updateTarget: (id: string, input: Partial<Omit<TargetProfile, "id" | "type">>) => void;
+  removeTarget: (id: string) => void;
+  setDefaultTarget: (id: string | null) => void;
+  setActiveTarget: (id: string) => void;
 };
 
 // Owpenbot Settings Component
@@ -910,6 +918,11 @@ export default function SettingsView(props: SettingsViewProps) {
   const [clientTokenVisible, setClientTokenVisible] = createSignal(false);
   const [hostTokenVisible, setHostTokenVisible] = createSignal(false);
   const [copyingField, setCopyingField] = createSignal<string | null>(null);
+  const [targetLabel, setTargetLabel] = createSignal("");
+  const [targetUrl, setTargetUrl] = createSignal("");
+  const [targetToken, setTargetToken] = createSignal("");
+  const [targetTokenVisible, setTargetTokenVisible] = createSignal(false);
+  const [targetError, setTargetError] = createSignal<string | null>(null);
   let copyTimeout: number | undefined;
 
   createEffect(() => {
@@ -945,6 +958,36 @@ export default function SettingsView(props: SettingsViewProps) {
         return "bg-gray-4/60 text-gray-11 border-gray-7/50";
     }
   });
+
+  const handleAddTarget = () => {
+    setTargetError(null);
+    const label = targetLabel().trim();
+    const baseUrl = targetUrl().trim();
+    if (!baseUrl) {
+      setTargetError("Target URL is required.");
+      return;
+    }
+    const added = props.addTarget({
+      label: label || baseUrl,
+      baseUrl,
+      token: targetToken().trim() || null,
+    });
+    if (!added) {
+      setTargetError("Enter a valid OpenWork URL.");
+      return;
+    }
+    setTargetLabel("");
+    setTargetUrl("");
+    setTargetToken("");
+    setTargetTokenVisible(false);
+  };
+
+  const targetStatusLabel = (target: TargetProfile) => {
+    if (target.type === "local") return "Local";
+    if (target.status === "online") return "Online";
+    if (target.status === "offline") return "Offline";
+    return "Unknown";
+  };
 
   const reloadAvailabilityReason = createMemo(() => {
     if (!props.clientConnected) return "Connect to this workspace to reload.";
@@ -1943,6 +1986,125 @@ export default function SettingsView(props: SettingsViewProps) {
                     OpenWork server connection needed to sync skills, plugins, and commands.
                   </div>
                 </Show>
+              </div>
+
+              <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">
+                <div>
+                  <div class="text-sm font-medium text-gray-12">Execution targets</div>
+                  <div class="text-xs text-gray-10">
+                    Add remote OpenWork targets for the Run on selector.
+                  </div>
+                </div>
+
+                <div class="grid gap-3">
+                  <TextInput
+                    label="Target label"
+                    value={targetLabel()}
+                    onInput={(event) => setTargetLabel(event.currentTarget.value)}
+                    placeholder="Remote build agent"
+                    hint="Optional name for this target."
+                    disabled={props.busy}
+                  />
+                  <TextInput
+                    label="OpenWork server URL"
+                    value={targetUrl()}
+                    onInput={(event) => setTargetUrl(event.currentTarget.value)}
+                    placeholder="http://10.0.0.12:8787"
+                    hint="Paste the OpenWork server URL for this target."
+                    disabled={props.busy}
+                  />
+                  <label class="block">
+                    <div class="mb-1 text-xs font-medium text-gray-11">Access token</div>
+                    <div class="flex items-center gap-2">
+                      <input
+                        type={targetTokenVisible() ? "text" : "password"}
+                        value={targetToken()}
+                        onInput={(event) => setTargetToken(event.currentTarget.value)}
+                        placeholder="Paste token if required"
+                        disabled={props.busy}
+                        class="w-full rounded-xl bg-gray-2/60 px-3 py-2 text-sm text-gray-12 placeholder:text-gray-10 shadow-[0_0_0_1px_rgba(255,255,255,0.08)] focus:outline-none focus:ring-2 focus:ring-gray-6/20"
+                      />
+                      <Button
+                        variant="outline"
+                        class="text-xs h-9 px-3 shrink-0"
+                        onClick={() => setTargetTokenVisible((prev) => !prev)}
+                        disabled={props.busy}
+                      >
+                        {targetTokenVisible() ? "Hide" : "Show"}
+                      </Button>
+                    </div>
+                    <div class="mt-1 text-xs text-gray-10">Optional. Required if the target needs auth.</div>
+                  </label>
+                </div>
+
+                <div class="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={handleAddTarget} disabled={props.busy}>
+                    Add target
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setTargetLabel("");
+                      setTargetUrl("");
+                      setTargetToken("");
+                      setTargetTokenVisible(false);
+                      setTargetError(null);
+                    }}
+                    disabled={props.busy}
+                  >
+                    Clear
+                  </Button>
+                </div>
+
+                <Show when={targetError()}>
+                  <div class="text-xs text-red-11">{targetError()}</div>
+                </Show>
+
+                <div class="border-t border-gray-6/40 pt-4 space-y-2">
+                  <For each={props.targets}>
+                    {(target) => (
+                      <div class="flex items-center justify-between bg-gray-1 p-3 rounded-xl border border-gray-6 gap-3">
+                        <div class="min-w-0">
+                          <div class="text-sm text-gray-12 truncate">{target.label}</div>
+                          <div class="text-xs text-gray-8 font-mono truncate">
+                            {target.baseUrl ?? (target.type === "local" ? "Local device" : "")}
+                          </div>
+                          <div class="text-[11px] text-gray-8 mt-1">
+                            {targetStatusLabel(target)}
+                            <Show when={props.defaultTargetId === target.id}>
+                              <span class="ml-2 text-[10px] uppercase tracking-wide text-gray-9">Default</span>
+                            </Show>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                          <Button
+                            variant="ghost"
+                            class="text-xs h-8 py-0 px-3"
+                            onClick={() => props.setActiveTarget(target.id)}
+                          >
+                            {props.activeTargetId === target.id ? "Active" : "Use"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            class="text-xs h-8 py-0 px-3"
+                            onClick={() => props.setDefaultTarget(target.id)}
+                          >
+                            {props.defaultTargetId === target.id ? "Default" : "Set default"}
+                          </Button>
+                          <Show when={target.type === "remote"}>
+                            <Button
+                              variant="ghost"
+                              class="text-xs h-8 py-0 px-3"
+                              onClick={() => props.removeTarget(target.id)}
+                            >
+                              Remove
+                            </Button>
+                          </Show>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
               </div>
 
               <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">

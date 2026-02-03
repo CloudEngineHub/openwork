@@ -25,6 +25,11 @@ pub fn build_openwork_args(
     host_token: &str,
     opencode_base_url: Option<&str>,
     opencode_directory: Option<&str>,
+    opencode_connect_url: Option<&str>,
+    connect_url: Option<&str>,
+    target_id: Option<&str>,
+    target_label: Option<&str>,
+    target_type: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec![
         "--host".to_string(),
@@ -60,10 +65,45 @@ pub fn build_openwork_args(
         }
     }
 
+    if let Some(connect_url) = opencode_connect_url {
+        if !connect_url.trim().is_empty() {
+            args.push("--opencode-connect-url".to_string());
+            args.push(connect_url.to_string());
+        }
+    }
+
     if let Some(directory) = opencode_directory {
         if !directory.trim().is_empty() {
             args.push("--opencode-directory".to_string());
             args.push(directory.to_string());
+        }
+    }
+
+    if let Some(connect_url) = connect_url {
+        if !connect_url.trim().is_empty() {
+            args.push("--connect-url".to_string());
+            args.push(connect_url.to_string());
+        }
+    }
+
+    if let Some(target_id) = target_id {
+        if !target_id.trim().is_empty() {
+            args.push("--target-id".to_string());
+            args.push(target_id.to_string());
+        }
+    }
+
+    if let Some(target_label) = target_label {
+        if !target_label.trim().is_empty() {
+            args.push("--target-label".to_string());
+            args.push(target_label.to_string());
+        }
+    }
+
+    if let Some(target_type) = target_type {
+        if !target_type.trim().is_empty() {
+            args.push("--target-type".to_string());
+            args.push(target_type.to_string());
         }
     }
 
@@ -82,6 +122,11 @@ pub fn spawn_openwork_server(
     opencode_username: Option<&str>,
     opencode_password: Option<&str>,
     owpenbot_health_port: Option<u16>,
+    opencode_connect_url: Option<&str>,
+    connect_url: Option<&str>,
+    target_id: Option<&str>,
+    target_label: Option<&str>,
+    target_type: Option<&str>,
 ) -> Result<(Receiver<CommandEvent>, CommandChild), String> {
     let command = match app.shell().sidecar("openwork-server") {
         Ok(command) => command,
@@ -96,6 +141,11 @@ pub fn spawn_openwork_server(
         host_token,
         opencode_base_url,
         opencode_directory,
+        opencode_connect_url,
+        connect_url,
+        target_id,
+        target_label,
+        target_type,
     );
     let cwd = workspace_paths
         .first()

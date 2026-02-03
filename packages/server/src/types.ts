@@ -1,5 +1,9 @@
 export type WorkspaceType = "local" | "remote";
 
+export type TargetType = "local" | "remote";
+
+export type SandboxStatus = "active" | "idle" | "archived";
+
 export type ApprovalMode = "manual" | "auto";
 
 export interface WorkspaceConfig {
@@ -29,6 +33,24 @@ export interface WorkspaceInfo {
   };
 }
 
+export interface TargetInfo {
+  id: string;
+  label: string;
+  type: TargetType;
+}
+
+export interface SandboxInfo {
+  id: string;
+  name: string;
+  targetId: string;
+  baseWorkspaceId: string;
+  path: string;
+  createdAt: number;
+  updatedAt: number;
+  status: SandboxStatus;
+  sizeBytes?: number;
+}
+
 export interface ApprovalConfig {
   mode: ApprovalMode;
   timeoutMs: number;
@@ -48,6 +70,9 @@ export interface ServerConfig {
   startedAt: number;
   tokenSource: "cli" | "env" | "file" | "generated";
   hostTokenSource: "cli" | "env" | "file" | "generated";
+  target: TargetInfo;
+  connectUrl?: string;
+  opencodeConnectUrl?: string;
 }
 
 export interface Capabilities {

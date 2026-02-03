@@ -1374,6 +1374,9 @@ function printHelp(): void {
     "  --read-only               Start OpenWork server in read-only mode",
     "  --cors <origins>          Comma-separated CORS origins or *",
     "  --connect-host <host>     Override LAN host used for pairing URLs",
+    "  --target-id <id>          Target id for descriptor",
+    "  --target-label <label>    Target label for descriptor",
+    "  --target-type <type>      local | remote",
     "  --openwork-server-bin <p> Path to openwork-server binary (requires --allow-external)",
     "  --owpenbot-bin <path>     Path to owpenbot binary (requires --allow-external)",
     "  --owpenbot-health-port <p> Health server port for owpenbot (default: 3005)",
@@ -1462,10 +1465,15 @@ async function startOpenworkServer(options: {
   readOnly: boolean;
   corsOrigins: string[];
   opencodeBaseUrl?: string;
+  opencodeConnectUrl?: string;
   opencodeDirectory?: string;
   opencodeUsername?: string;
   opencodePassword?: string;
   owpenbotHealthPort?: number;
+  targetId?: string;
+  targetLabel?: string;
+  targetType?: "local" | "remote";
+  connectUrl?: string;
 }) {
   const args = [
     "--host",
@@ -1495,6 +1503,9 @@ async function startOpenworkServer(options: {
   if (options.opencodeBaseUrl) {
     args.push("--opencode-base-url", options.opencodeBaseUrl);
   }
+  if (options.opencodeConnectUrl) {
+    args.push("--opencode-connect-url", options.opencodeConnectUrl);
+  }
   if (options.opencodeDirectory) {
     args.push("--opencode-directory", options.opencodeDirectory);
   }
@@ -1503,6 +1514,18 @@ async function startOpenworkServer(options: {
   }
   if (options.opencodePassword) {
     args.push("--opencode-password", options.opencodePassword);
+  }
+  if (options.targetId) {
+    args.push("--target-id", options.targetId);
+  }
+  if (options.targetLabel) {
+    args.push("--target-label", options.targetLabel);
+  }
+  if (options.targetType) {
+    args.push("--target-type", options.targetType);
+  }
+  if (options.connectUrl) {
+    args.push("--connect-url", options.connectUrl);
   }
 
   const resolved = resolveBinCommand(options.bin);
@@ -1515,9 +1538,14 @@ async function startOpenworkServer(options: {
       OPENWORK_HOST_TOKEN: options.hostToken,
       ...(options.owpenbotHealthPort ? { OWPENBOT_HEALTH_PORT: String(options.owpenbotHealthPort) } : {}),
       ...(options.opencodeBaseUrl ? { OPENWORK_OPENCODE_BASE_URL: options.opencodeBaseUrl } : {}),
+      ...(options.opencodeConnectUrl ? { OPENWORK_OPENCODE_CONNECT_URL: options.opencodeConnectUrl } : {}),
       ...(options.opencodeDirectory ? { OPENWORK_OPENCODE_DIRECTORY: options.opencodeDirectory } : {}),
       ...(options.opencodeUsername ? { OPENWORK_OPENCODE_USERNAME: options.opencodeUsername } : {}),
       ...(options.opencodePassword ? { OPENWORK_OPENCODE_PASSWORD: options.opencodePassword } : {}),
+      ...(options.targetId ? { OPENWORK_TARGET_ID: options.targetId } : {}),
+      ...(options.targetLabel ? { OPENWORK_TARGET_LABEL: options.targetLabel } : {}),
+      ...(options.targetType ? { OPENWORK_TARGET_TYPE: options.targetType } : {}),
+      ...(options.connectUrl ? { OPENWORK_CONNECT_URL: options.connectUrl } : {}),
     },
   });
 
@@ -2527,6 +2555,20 @@ async function runStart(args: ParsedArgs) {
   const corsValue = readFlag(args.flags, "cors") ?? process.env.OPENWORK_CORS_ORIGINS ?? "*";
   const corsOrigins = parseList(corsValue);
   const connectHost = readFlag(args.flags, "connect-host");
+  const targetTypeRaw = readFlag(args.flags, "target-type") ?? process.env.OPENWORK_TARGET_TYPE;
+  const targetType = targetTypeRaw === "remote" ? "remote" : "local";
+  const targetIdRaw = readFlag(args.flags, "target-id") ?? process.env.OPENWORK_TARGET_ID;
+  const targetLabelRaw = readFlag(args.flags, "target-label") ?? process.env.OPENWORK_TARGET_LABEL;
+  const targetId = typeof targetIdRaw === "string" && targetIdRaw.trim().length
+    ? targetIdRaw.trim()
+    : targetType === "remote"
+      ? "tgt-remote"
+      : "tgt-local";
+  const targetLabel = typeof targetLabelRaw === "string" && targetLabelRaw.trim().length
+    ? targetLabelRaw.trim()
+    : targetType === "remote"
+      ? "Remote target"
+      : "Local (this device)";
 
   const cliVersion = await resolveCliVersion();
   const sidecar = resolveSidecarConfig(args.flags, cliVersion);
@@ -2641,11 +2683,16 @@ async function runStart(args: ParsedArgs) {
       approvalTimeoutMs,
       readOnly,
       corsOrigins: corsOrigins.length ? corsOrigins : ["*"],
-      opencodeBaseUrl: opencodeConnectUrl,
+      opencodeBaseUrl,
+      opencodeConnectUrl: opencodeConnectUrl,
       opencodeDirectory: resolvedWorkspace,
       opencodeUsername,
       opencodePassword,
       owpenbotHealthPort,
+      targetId,
+      targetLabel,
+      targetType,
+      connectUrl: openworkConnectUrl,
     });
     children.push({ name: "openwork-server", child: openworkChild });
     openworkChild.on("exit", (code, signal) => handleExit("openwork-server", code, signal));

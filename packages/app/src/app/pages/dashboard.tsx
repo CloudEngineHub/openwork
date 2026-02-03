@@ -10,17 +10,19 @@ import type {
   ScheduledJob,
   SkillCard,
   StartupPreference,
+  TargetProfile,
   WorkspaceCommand,
   View,
 } from "../types";
 import type { McpDirectoryInfo } from "../constants";
-import { formatRelativeTime } from "../utils";
+import { formatBytes, formatRelativeTime } from "../utils";
 import type {
   OpenworkAuditEntry,
   OpenworkServerCapabilities,
   OpenworkServerDiagnostics,
   OpenworkServerSettings,
   OpenworkServerStatus,
+  OpenworkSandboxInfo,
 } from "../lib/openwork-server";
 import type { EngineInfo, OpenwrkStatus, OpenworkServerInfo, OwpenbotInfo, WorkspaceInfo } from "../lib/tauri";
 
@@ -88,6 +90,14 @@ export type DashboardViewProps = {
   opencodeConnectStatus: OpencodeConnectStatus | null;
   engineInfo: EngineInfo | null;
   engineDoctorVersion: string | null;
+  targets: TargetProfile[];
+  activeTargetId: string;
+  defaultTargetId: string | null;
+  addTarget: (input: { label: string; baseUrl: string; token?: string | null }) => TargetProfile | null;
+  updateTarget: (id: string, input: Partial<Omit<TargetProfile, "id" | "type">>) => void;
+  removeTarget: (id: string) => void;
+  setDefaultTarget: (id: string | null) => void;
+  setActiveTarget: (id: string) => void;
   openwrkStatus: OpenwrkStatus | null;
   owpenbotInfo: OwpenbotInfo | null;
   updateOpenworkServerSettings: (next: OpenworkServerSettings) => void;
@@ -108,6 +118,11 @@ export type DashboardViewProps = {
   setWorkspacePickerOpen: (open: boolean) => void;
   connectingWorkspaceId: string | null;
   workspaces: WorkspaceInfo[];
+  sandboxes: OpenworkSandboxInfo[];
+  activeSandboxId: string | null;
+  createSandbox: (input: { name?: string | null; source?: "base" | "sandbox" }) => Promise<boolean> | boolean;
+  activateSandbox: (sandboxId: string) => Promise<boolean> | boolean;
+  archiveSandbox: (sandboxId: string) => Promise<boolean> | boolean;
   filteredWorkspaces: WorkspaceInfo[];
   activeWorkspaceId: string;
   activateWorkspace: (id: string) => Promise<boolean> | boolean;
@@ -282,6 +297,8 @@ export default function DashboardView(props: DashboardViewProps) {
 
   const quickCommands = createMemo(() => props.workspaceCommands.slice(0, 3));
   const canExportWorkspace = createMemo(() => props.activeWorkspaceDisplay.workspaceType !== "remote");
+  const showSandboxes = createMemo(() => props.sandboxes.length > 0);
+  const activeSandboxId = createMemo(() => props.activeSandboxId);
 
   const openSessionFromList = (sessionId: string) => {
     // Defer view switch to avoid click-through on the same event frame.
@@ -667,88 +684,164 @@ export default function DashboardView(props: DashboardViewProps) {
               </section>
 
               <section>
-                <div class="flex items-center justify-between mb-4">
-                  <h3 class="text-sm font-medium text-gray-11 uppercase tracking-wider">
-                    Workspaces
-                  </h3>
-                  <div class="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      class="text-xs h-8 px-3"
-                      onClick={props.exportWorkspaceConfig}
-                      disabled={!canExportWorkspace() || props.exportWorkspaceBusy}
-                      title={
-                        !canExportWorkspace()
-                          ? "Export is only available for local workspaces"
-                          : "Export workspace config"
-                      }
-                    >
-                      Share config
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      class="text-xs h-8 px-3"
-                      onClick={() => props.setWorkspacePickerOpen(true)}
-                    >
-                      <Plus size={14} />
-                      Add workspace
-                    </Button>
-                  </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <For each={props.workspaces}>
-                    {(workspace) => (
-                      <div class="rounded-2xl border border-gray-6/60 bg-gray-1/40 p-4 space-y-3">
-                        <div class="flex items-start justify-between">
-                          <div class="space-y-1 min-w-0">
-                            <div class="text-sm font-semibold text-gray-12 truncate">
-                              {workspace.displayName ?? workspace.name}
-                            </div>
-                            <div class="flex items-center gap-2 text-xs text-gray-10 font-mono">
-                              <span class="truncate min-w-0">
-                                {workspacePathLabel(workspace)}
-                              </span>
-                              <button
-                                type="button"
-                                class="shrink-0 rounded-md p-1 text-gray-9 hover:text-gray-12 hover:bg-gray-3 transition-colors"
-                                onClick={() => handleCopyWorkspace(workspace)}
-                                title={copiedWorkspaceId() === workspace.id ? "Copied" : "Copy path"}
-                                aria-label="Copy workspace path"
-                              >
-                                <Show when={copiedWorkspaceId() === workspace.id} fallback={<Copy size={12} />}>
-                                  <Check size={12} class="text-green-11" />
-                                </Show>
-                              </button>
-                            </div>
-                          </div>
-                          <span class="text-[11px] text-gray-9">
-                            {workspace.workspaceType === "remote" ? "Remote" : "Local"}
-                          </span>
-                        </div>
-                        <div class="flex items-center justify-end text-xs text-gray-9 h-8">
-                          <Show when={workspace.id === props.activeWorkspaceId}>
-                            <span class="text-green-11 font-medium flex items-center gap-1.5 !px-2">
-                              Active
-                            </span>
-                          </Show>
-                          <Show when={workspace.id !== props.activeWorkspaceId}>
-                            <Button
-                              variant="ghost"
-                              class="text-xs !px-2 py-1"
-                              onClick={() => props.activateWorkspace(workspace.id)}
-                              disabled={props.connectingWorkspaceId === workspace.id}
-                            >
-                              {props.connectingWorkspaceId === workspace.id
-                                ? "Switching..."
-                                : "Switch"}
-                            </Button>
-                          </Show>
+                <Show
+                  when={showSandboxes()}
+                  fallback={
+                    <>
+                      <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-sm font-medium text-gray-11 uppercase tracking-wider">
+                          Workspaces
+                        </h3>
+                        <div class="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            class="text-xs h-8 px-3"
+                            onClick={props.exportWorkspaceConfig}
+                            disabled={!canExportWorkspace() || props.exportWorkspaceBusy}
+                            title={
+                              !canExportWorkspace()
+                                ? "Export is only available for local workspaces"
+                                : "Export workspace config"
+                            }
+                          >
+                            Share config
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            class="text-xs h-8 px-3"
+                            onClick={() => props.setWorkspacePickerOpen(true)}
+                          >
+                            <Plus size={14} />
+                            Add workspace
+                          </Button>
                         </div>
                       </div>
-                    )}
-                  </For>
-                </div>
+
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <For each={props.workspaces}>
+                          {(workspace) => (
+                            <div class="rounded-2xl border border-gray-6/60 bg-gray-1/40 p-4 space-y-3">
+                              <div class="flex items-start justify-between">
+                                <div class="space-y-1 min-w-0">
+                                  <div class="text-sm font-semibold text-gray-12 truncate">
+                                    {workspace.displayName ?? workspace.name}
+                                  </div>
+                                  <div class="flex items-center gap-2 text-xs text-gray-10 font-mono">
+                                    <span class="truncate min-w-0">
+                                      {workspacePathLabel(workspace)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      class="shrink-0 rounded-md p-1 text-gray-9 hover:text-gray-12 hover:bg-gray-3 transition-colors"
+                                      onClick={() => handleCopyWorkspace(workspace)}
+                                      title={copiedWorkspaceId() === workspace.id ? "Copied" : "Copy path"}
+                                      aria-label="Copy workspace path"
+                                    >
+                                      <Show
+                                        when={copiedWorkspaceId() === workspace.id}
+                                        fallback={<Copy size={12} />}
+                                      >
+                                        <Check size={12} class="text-green-11" />
+                                      </Show>
+                                    </button>
+                                  </div>
+                                </div>
+                                <span class="text-[11px] text-gray-9">
+                                  {workspace.workspaceType === "remote" ? "Remote" : "Local"}
+                                </span>
+                              </div>
+                              <div class="flex items-center justify-end text-xs text-gray-9 h-8">
+                                <Show when={workspace.id === props.activeWorkspaceId}>
+                                  <span class="text-green-11 font-medium flex items-center gap-1.5 !px-2">
+                                    Active
+                                  </span>
+                                </Show>
+                                <Show when={workspace.id !== props.activeWorkspaceId}>
+                                  <Button
+                                    variant="ghost"
+                                    class="text-xs !px-2 py-1"
+                                    onClick={() => props.activateWorkspace(workspace.id)}
+                                    disabled={props.connectingWorkspaceId === workspace.id}
+                                  >
+                                    {props.connectingWorkspaceId === workspace.id ? "Switching..." : "Switch"}
+                                  </Button>
+                                </Show>
+                              </div>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </>
+                  }
+                >
+                  <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-sm font-medium text-gray-11 uppercase tracking-wider">Sandboxes</h3>
+                    <div class="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        class="text-xs h-8 px-3"
+                        onClick={() => props.createSandbox({ source: "sandbox" })}
+                        disabled={!activeSandboxId()}
+                        title={!activeSandboxId() ? "Pick a sandbox first" : "Copy current sandbox"}
+                      >
+                        Copy current
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        class="text-xs h-8 px-3"
+                        onClick={() => props.createSandbox({ source: "base" })}
+                      >
+                        <Plus size={14} />
+                        New sandbox
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <For each={props.sandboxes}>
+                      {(sandbox) => (
+                        <div class="rounded-2xl border border-gray-6/60 bg-gray-1/40 p-4 space-y-3">
+                          <div class="flex items-start justify-between">
+                            <div class="space-y-1 min-w-0">
+                              <div class="text-sm font-semibold text-gray-12 truncate">{sandbox.name}</div>
+                              <div class="flex items-center gap-2 text-xs text-gray-10 font-mono">
+                                <span class="truncate min-w-0">{sandbox.path}</span>
+                                <Show when={sandbox.sizeBytes}>
+                                  <span class="text-[10px] text-gray-8">
+                                    {formatBytes(sandbox.sizeBytes ?? 0)}
+                                  </span>
+                                </Show>
+                              </div>
+                            </div>
+                            <span class="text-[11px] text-gray-9">{sandbox.status}</span>
+                          </div>
+                          <div class="flex items-center justify-end text-xs text-gray-9 h-8 gap-2">
+                            <Show when={sandbox.id === props.activeSandboxId}>
+                              <span class="text-green-11 font-medium flex items-center gap-1.5 !px-2">Active</span>
+                            </Show>
+                            <Show when={sandbox.id !== props.activeSandboxId}>
+                              <Button
+                                variant="ghost"
+                                class="text-xs !px-2 py-1"
+                                onClick={() => props.activateSandbox(sandbox.id)}
+                                disabled={props.connectingWorkspaceId === sandbox.id}
+                              >
+                                {props.connectingWorkspaceId === sandbox.id ? "Switching..." : "Switch"}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                class="text-xs !px-2 py-1"
+                                onClick={() => props.archiveSandbox(sandbox.id)}
+                              >
+                                Archive
+                              </Button>
+                            </Show>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
               </section>
 
               <section>
@@ -992,6 +1085,14 @@ export default function DashboardView(props: DashboardViewProps) {
                   openwrkStatus={props.openwrkStatus}
                   owpenbotInfo={props.owpenbotInfo}
                   engineDoctorVersion={props.engineDoctorVersion}
+                  targets={props.targets}
+                  activeTargetId={props.activeTargetId}
+                  defaultTargetId={props.defaultTargetId}
+                  addTarget={props.addTarget}
+                  updateTarget={props.updateTarget}
+                  removeTarget={props.removeTarget}
+                  setDefaultTarget={props.setDefaultTarget}
+                  setActiveTarget={props.setActiveTarget}
                   updateOpenworkServerSettings={props.updateOpenworkServerSettings}
                   resetOpenworkServerSettings={props.resetOpenworkServerSettings}
                   testOpenworkServerConnection={props.testOpenworkServerConnection}
