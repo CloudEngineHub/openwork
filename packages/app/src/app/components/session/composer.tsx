@@ -1044,6 +1044,8 @@ export default function Composer(props: ComposerProps) {
                       contentEditable={true}
                       role="textbox"
                       aria-multiline="true"
+                      aria-label="Task prompt"
+                      aria-placeholder="Ask OpenWork"
                       onInput={() => {
                         updateMentionQuery();
                         emitDraftChange();
