@@ -708,13 +708,36 @@ export default function App() {
     const parts: PartInput[] = [];
     parts.push({ type: "text", text: draft.text } as TextPartInput);
 
+    const root = workspaceProjectDir().trim();
+    const toAbsolutePath = (path: string) => {
+      const trimmed = path.trim();
+      if (!trimmed) return "";
+      if (trimmed.startsWith("/")) return trimmed;
+      // Windows absolute path, e.g. C:\foo\bar
+      if (/^[a-zA-Z]:\\/.test(trimmed)) return trimmed;
+      if (!root) return trimmed;
+      return (root + "/" + trimmed).replace("//", "/");
+    };
+    const filenameFromPath = (path: string) => {
+      const normalized = path.replace(/\\/g, "/");
+      const segments = normalized.split("/").filter(Boolean);
+      return segments[segments.length - 1] ?? "file";
+    };
+
     for (const part of draft.parts) {
       if (part.type === "agent") {
         parts.push({ type: "agent", name: part.name } as AgentPartInput);
         continue;
       }
       if (part.type === "file") {
-        parts.push({ type: "file", path: part.path } as unknown as FilePartInput);
+        const absolute = toAbsolutePath(part.path);
+        if (!absolute) continue;
+        parts.push({
+          type: "file",
+          mime: "text/plain",
+          url: `file://${absolute}`,
+          filename: filenameFromPath(part.path),
+        } as FilePartInput);
       }
     }
 
