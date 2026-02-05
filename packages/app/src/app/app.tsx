@@ -706,21 +706,16 @@ export default function App() {
 
   const buildPromptParts = (draft: ComposerDraft): PartInput[] => {
     const parts: PartInput[] = [];
-    const pushText = (text: string) => {
-      if (!text) return;
-      parts.push({ type: "text", text } as TextPartInput);
-    };
+    parts.push({ type: "text", text: draft.text } as TextPartInput);
 
     for (const part of draft.parts) {
-      if (part.type === "text") {
-        pushText(part.text);
-        continue;
-      }
       if (part.type === "agent") {
         parts.push({ type: "agent", name: part.name } as AgentPartInput);
         continue;
       }
-      parts.push({ type: "file", path: part.path } as unknown as FilePartInput);
+      if (part.type === "file") {
+        parts.push({ type: "file", path: part.path } as unknown as FilePartInput);
+      }
     }
 
     for (const attachment of draft.attachments) {
@@ -730,14 +725,6 @@ export default function App() {
         filename: attachment.name,
         mime: attachment.mimeType,
       } as FilePartInput);
-    }
-
-    const hasTextPart = parts.some((part) => part.type === "text");
-    if (!hasTextPart && draft.attachments.length) {
-      pushText(draft.text.trim());
-    }
-    if (!parts.length && draft.text.trim()) {
-      pushText(draft.text.trim());
     }
 
     return parts;
