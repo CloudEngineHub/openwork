@@ -77,7 +77,10 @@ const DEFAULT_OPENCODE_USERNAME = "opencode";
 
 const SANDBOX_INTERNAL_OPENCODE_PORT = 4096;
 const SANDBOX_INTERNAL_OPENWORK_PORT = DEFAULT_OPENWORK_PORT;
-const SANDBOX_INTERNAL_OWPENBOT_HEALTH_PORT = DEFAULT_OWPENBOT_HEALTH_PORT;
+// Owpenbot defaults its health server to 3005 when not overridden. In sandbox
+// mode we keep the *internal* port stable and only vary the published host
+// port to avoid collisions.
+const SANDBOX_INTERNAL_OWPENBOT_HEALTH_PORT = 3005;
 
 type ParsedArgs = {
   positionals: string[];
