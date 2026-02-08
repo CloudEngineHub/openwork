@@ -129,10 +129,7 @@ const opencodeTargetName = resolvedTargetTriple
 const opencodeTargetPath = opencodeTargetName ? join(sidecarDir, opencodeTargetName) : null;
 
 const opencodeCandidatePath = opencodeTargetPath ?? opencodePath;
-const existingOpencodeVersion =
-  opencodeCandidatePath && existsSync(opencodeCandidatePath) && !isStubBinary(opencodeCandidatePath)
-    ? readBinaryVersion(opencodeCandidatePath)
-    : null;
+let existingOpencodeVersion = null;
 
 // openwork-server paths
 const openworkServerBaseName = "openwork-server";
@@ -338,6 +335,13 @@ if (existsSync(openworkServerBuildPath)) {
       copyFileSync(openworkServerBuildPath, openworkServerTargetPath);
     }
   }
+}
+
+if (!existingOpencodeVersion && opencodeCandidatePath) {
+  existingOpencodeVersion =
+    existsSync(opencodeCandidatePath) && !isStubBinary(opencodeCandidatePath)
+      ? readBinaryVersion(opencodeCandidatePath)
+      : null;
 }
 
 let normalizedOpencodeVersion = normalizeVersion(opencodeVersion);
