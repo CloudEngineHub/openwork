@@ -131,6 +131,19 @@ a:hover { text-decoration: underline; }
   gap: 10px;
 }
 
+.timeline {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timeline .list {
+  max-height: 160px;
+  overflow: auto;
+}
+
 .msg {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -177,6 +190,19 @@ a:hover { text-decoration: underline; }
 }
 
 .composer textarea:focus { border-color: rgba(83, 184, 255, 0.45); }
+
+.input {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.input:focus { border-color: rgba(83, 184, 255, 0.45); }
 
 .btn {
   appearance: none;
@@ -261,6 +287,13 @@ export const TOY_UI_HTML = `<!doctype html>
             <span>Session</span>
             <span class="small mono" id="session-id">session: -</span>
           </h2>
+          <div class="timeline">
+            <div class="row">
+              <span class="pill" id="pill-run">idle</span>
+              <span class="small" id="timeline-hint">Checkpoints stream from SSE events.</span>
+            </div>
+            <div class="list" id="timeline"></div>
+          </div>
           <div class="chatlog" id="chatlog"></div>
           <div class="composer">
             <div class="row">
@@ -271,6 +304,7 @@ export const TOY_UI_HTML = `<!doctype html>
             <textarea id="prompt" placeholder="Write a prompt..." spellcheck="false"></textarea>
             <div class="row">
               <button class="btn primary" id="btn-send">Send prompt</button>
+              <button class="btn" id="btn-skill">Turn into skill</button>
               <button class="btn" id="btn-events">Connect SSE</button>
               <button class="btn" id="btn-events-stop">Stop SSE</button>
               <span class="small" id="status"></span>
@@ -284,6 +318,8 @@ export const TOY_UI_HTML = `<!doctype html>
             <div class="kv">
               <div class="k">workspace</div>
               <div class="mono" id="workspace-id">-</div>
+              <div class="k">workspace url</div>
+              <div><a class="mono" id="workspace-url" href="#" target="_blank" rel="noreferrer">-</a></div>
               <div class="k">server</div>
               <div class="mono" id="server-version">-</div>
               <div class="k">sandbox</div>
@@ -319,7 +355,20 @@ export const TOY_UI_HTML = `<!doctype html>
             <div class="hr"></div>
 
             <div class="row">
-              <button class="btn" id="btn-share">Show connect artifact</button>
+              <select class="input" id="share-scope">
+                <option value="collaborator">collaborator</option>
+                <option value="viewer">viewer</option>
+              </select>
+              <input class="input" id="share-label" type="text" placeholder="label (optional)" />
+              <button class="btn" id="btn-mint">Mint token</button>
+              <button class="btn" id="btn-deploy">Deploy (Beta)</button>
+            </div>
+            <div class="small">Minting tokens requires an owner token (or host access).</div>
+
+            <div class="hr"></div>
+
+            <div class="row">
+              <button class="btn" id="btn-share">Connect artifact (current token)</button>
               <button class="btn" id="btn-copy">Copy JSON</button>
             </div>
             <div class="codebox" id="connect"></div>
@@ -349,6 +398,11 @@ const artifactsEl = qs("#artifacts");
 const approvalsEl = qs("#approvals");
 const connectEl = qs("#connect");
 const hostIdEl = qs("#host-id");
+const pillRun = qs("#pill-run");
+const timelineEl = qs("#timeline");
+const workspaceUrlEl = qs("#workspace-url");
+const shareScopeEl = qs("#share-scope");
+const shareLabelEl = qs("#share-label");
 
 const STORAGE_TOKEN = "openwork.toy.token";
 const STORAGE_SESSION_PREFIX = "openwork.toy.session.";
@@ -357,6 +411,64 @@ function setPill(el, label, kind) {
   el.textContent = label;
   el.classList.remove("ok", "bad");
   if (kind) el.classList.add(kind);
+}
+
+function setRun(label, kind) {
+  if (!pillRun) return;
+  setPill(pillRun, label, kind);
+}
+
+function clearTimeline() {
+  if (!timelineEl) return;
+  timelineEl.innerHTML = "";
+}
+
+function summarizeEvent(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const keys = ["name", "tool", "action", "summary", "status", "message"];
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function addCheckpoint(label, detail) {
+  if (!timelineEl) return;
+
+  const row = document.createElement("div");
+  row.className = "item";
+
+  const top = document.createElement("div");
+  top.className = "row";
+
+  const left = document.createElement("div");
+  const name = document.createElement("div");
+  name.className = "mono";
+  name.textContent = label;
+
+  const meta = document.createElement("div");
+  meta.className = "small";
+  meta.textContent = new Date().toLocaleTimeString();
+
+  left.appendChild(name);
+  left.appendChild(meta);
+  top.appendChild(left);
+  row.appendChild(top);
+
+  if (detail) {
+    const d = document.createElement("div");
+    d.className = "small";
+    d.textContent = detail;
+    row.appendChild(d);
+  }
+
+  timelineEl.appendChild(row);
+  timelineEl.scrollTop = timelineEl.scrollHeight;
+
+  while (timelineEl.children.length > 80) {
+    timelineEl.removeChild(timelineEl.firstChild);
+  }
 }
 
 function getTokenFromHash() {
@@ -688,6 +800,7 @@ async function connectSse(workspaceId) {
   const controller = new AbortController();
   eventsAbort = controller;
   setStatus("Connecting SSE...", "");
+  addCheckpoint("sse.connecting");
 
   const url = "/w/" + encodeURIComponent(workspaceId) + "/opencode/event";
   const res = await fetch(url, {
@@ -701,6 +814,7 @@ async function connectSse(workspaceId) {
   }
 
   setStatus("SSE connected", "ok");
+  addCheckpoint("sse.connected");
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
 
@@ -726,6 +840,11 @@ async function connectSse(workspaceId) {
         try {
           const event = JSON.parse(raw);
           const payload = event && event.payload ? event.payload : event;
+          const type = payload && payload.type ? String(payload.type) : (event && event.type ? String(event.type) : "event");
+          addCheckpoint(type, summarizeEvent(payload));
+          if (type.endsWith(".completed") || type.endsWith(".finished") || type.endsWith(".stopped")) {
+            setRun("idle");
+          }
           if (payload && payload.type === "message.part.updated") {
             void refreshMessages(workspaceId);
           }
@@ -742,6 +861,8 @@ async function connectSse(workspaceId) {
       eventsAbort = null;
       try { reader.releaseLock(); } catch {}
       setStatus("SSE disconnected", "");
+      addCheckpoint("sse.disconnected");
+      setRun("idle");
     });
 }
 
@@ -751,17 +872,7 @@ function stopSse() {
   eventsAbort = null;
 }
 
-async function showConnectArtifact(workspaceId) {
-  const token = readToken();
-  let scope = "collaborator";
-  try {
-    const me = await apiFetch("/whoami");
-    const s = me && me.actor && me.actor.scope ? me.actor.scope : "";
-    if (s) scope = s;
-  } catch {
-    // ignore
-  }
-
+function renderConnectArtifact(workspaceId, token, scope) {
   const hostUrl = location.origin;
   const workspaceUrl = hostUrl + "/w/" + encodeURIComponent(workspaceId);
   const payload = {
@@ -774,6 +885,33 @@ async function showConnectArtifact(workspaceId) {
     createdAt: Date.now(),
   };
   connectEl.textContent = JSON.stringify(payload, null, 2);
+}
+
+async function showConnectArtifact(workspaceId) {
+  const token = readToken();
+  let scope = "collaborator";
+  try {
+    const me = await apiFetch("/whoami");
+    const s = me && me.actor && me.actor.scope ? me.actor.scope : "";
+    if (s) scope = s;
+  } catch {
+    // ignore
+  }
+  renderConnectArtifact(workspaceId, token, scope);
+}
+
+async function mintShareToken(workspaceId) {
+  const scope = shareScopeEl && shareScopeEl.value ? String(shareScopeEl.value) : "collaborator";
+  const label = shareLabelEl && shareLabelEl.value ? String(shareLabelEl.value).trim() : "";
+  const issued = await apiFetch("/tokens", {
+    method: "POST",
+    body: JSON.stringify({ scope, label: label || undefined }),
+  });
+  const token = issued && issued.token ? String(issued.token) : "";
+  const tokenScope = issued && issued.scope ? String(issued.scope) : scope;
+  if (!token) throw new Error("token_missing");
+  renderConnectArtifact(workspaceId, token, tokenScope);
+  setStatus("Token minted: " + tokenScope, "ok");
 }
 
 async function copyConnectArtifact() {
@@ -809,6 +947,14 @@ async function main() {
     return;
   }
 
+  setRun("idle");
+  clearTimeline();
+  if (workspaceUrlEl) {
+    const wsUrl = location.origin + "/w/" + encodeURIComponent(workspaceId);
+    workspaceUrlEl.textContent = wsUrl;
+    workspaceUrlEl.href = wsUrl;
+  }
+
   await refreshHost(workspaceId);
   sessionIdEl.textContent = readSessionId(workspaceId) ? ("session: " + readSessionId(workspaceId)) : "session: -";
   await refreshMessages(workspaceId).catch(() => undefined);
@@ -831,6 +977,10 @@ async function main() {
   qs("#btn-send").onclick = async () => {
     const text = (promptEl.value || "").trim();
     if (!text) return;
+    clearTimeline();
+    addCheckpoint("prompt.submitted", text.length > 120 ? (text.slice(0, 120) + "...") : text);
+    setRun("running");
+    void connectSse(workspaceId).catch(() => undefined);
     appendMsg("user", text);
     promptEl.value = "";
     try {
@@ -844,10 +994,41 @@ async function main() {
         { method: "POST", body: JSON.stringify(body) },
       );
       setStatus("Prompt accepted", "ok");
+      addCheckpoint("prompt.accepted");
       await refreshMessages(workspaceId).catch(() => undefined);
     } catch (e) {
       setStatus(e && e.message ? e.message : "Prompt failed", "bad");
+      addCheckpoint("prompt.failed", e && e.message ? e.message : "Prompt failed");
+      setRun("idle");
     }
+  };
+
+  qs("#btn-skill").onclick = () => {
+    const template = [
+      "Turn this into a skill.",
+      "",
+      "Requirements:",
+      "- Skill name: my-skill",
+      "- Write to .opencode/skills/my-skill/SKILL.md",
+      "- Include usage, inputs, steps, and examples",
+      "",
+      "Use the most recent conversation as source material.",
+    ].join("\n");
+    const existing = (promptEl.value || "").trim();
+    promptEl.value = existing ? (existing + "\n\n" + template) : template;
+    promptEl.focus();
+  };
+
+  qs("#btn-mint").onclick = async () => {
+    try {
+      await mintShareToken(workspaceId);
+    } catch (e) {
+      setStatus(e && e.message ? e.message : "Token mint failed", "bad");
+    }
+  };
+
+  qs("#btn-deploy").onclick = () => {
+    setStatus("Deploy (Beta) is not implemented in the Toy UI yet", "");
   };
 
   qs("#btn-events").onclick = async () => {
