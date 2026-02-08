@@ -258,6 +258,51 @@ a:hover { text-decoration: underline; }
 .small { font-size: 11px; color: var(--muted-2); }
 
 .hr { height: 1px; background: var(--border); margin: 10px 0; }
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tab.active {
+  border-color: rgba(83, 184, 255, 0.6);
+  background: rgba(83, 184, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.panel { display: block; margin-top: 10px; }
+.panel.hidden { display: none; }
+.hidden { display: none !important; }
+
+.inputarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+  max-height: 260px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  outline: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.inputarea:focus { border-color: rgba(83, 184, 255, 0.45); }
 `;
 
 export const TOY_UI_HTML = `<!doctype html>
@@ -330,48 +375,149 @@ export const TOY_UI_HTML = `<!doctype html>
 
             <div class="hr"></div>
 
-            <div class="row">
-              <input id="file" type="file" />
-              <button class="btn" id="btn-upload">Upload to inbox</button>
+            <div class="tabs" id="tabs">
+              <button class="tab active" data-tab="share">Share</button>
+              <button class="tab" data-tab="automations">Automations</button>
+              <button class="tab" data-tab="skills">Skills</button>
+              <button class="tab" data-tab="plugins">Plugins</button>
+              <button class="tab" data-tab="apps">Apps</button>
+              <button class="tab" data-tab="config">Config</button>
             </div>
-            <div class="small">Uploads go to <span class="mono">.opencode/openwork/inbox/</span> inside the workspace.</div>
 
-            <div class="hr"></div>
+            <div class="panel" data-panel="share">
+              <div class="row">
+                <select class="input" id="share-scope">
+                  <option value="collaborator">collaborator</option>
+                  <option value="viewer">viewer</option>
+                </select>
+                <input class="input" id="share-label" type="text" placeholder="label (optional)" />
+                <button class="btn" id="btn-mint">Mint token</button>
+                <button class="btn" id="btn-deploy">Deploy (Beta)</button>
+              </div>
+              <div class="small">Minting tokens requires an owner token (or host access).</div>
 
-            <div class="row">
-              <button class="btn" id="btn-artifacts">List artifacts</button>
-              <span class="small">Downloads read from <span class="mono">.opencode/openwork/outbox/</span>.</span>
+              <div class="hr"></div>
+
+              <div class="row">
+                <button class="btn" id="btn-share">Connect artifact (current token)</button>
+                <button class="btn" id="btn-copy">Copy JSON</button>
+                <button class="btn" id="btn-tokens">List tokens</button>
+              </div>
+              <div class="codebox" id="connect"></div>
+              <div class="list" id="tokens"></div>
+
+              <div class="hr"></div>
+
+              <div class="row">
+                <button class="btn" id="btn-export">Export workspace</button>
+              </div>
+              <div class="codebox" id="export"></div>
+
+              <div class="hr"></div>
+
+              <div class="row">
+                <button class="btn" id="btn-import">Import workspace</button>
+                <span class="small">(pastes JSON below)</span>
+              </div>
+              <textarea class="inputarea" id="import" placeholder="Paste export JSON..." spellcheck="false"></textarea>
             </div>
-            <div class="list" id="artifacts"></div>
 
-            <div class="hr"></div>
+            <div class="panel hidden" data-panel="automations">
+              <div class="row">
+                <button class="btn" id="btn-auto-refresh">Refresh</button>
+                <span class="small">Apply schedule on host via <span class="mono">openwork-agent-lab scheduler sync</span>.</span>
+              </div>
+              <div class="list" id="automations"></div>
 
-            <div class="row">
-              <button class="btn" id="btn-approvals">Refresh approvals</button>
-              <span class="small">(Owner or host token required)</span>
+              <div class="codebox" id="auto-log"></div>
+
+              <div class="hr"></div>
+
+              <div class="small">Create automation</div>
+              <div class="row">
+                <input class="input" id="auto-name" type="text" placeholder="name" />
+                <select class="input" id="auto-kind">
+                  <option value="interval">interval</option>
+                  <option value="daily">daily</option>
+                  <option value="weekly">weekly</option>
+                </select>
+              </div>
+              <div class="row" id="auto-interval-row">
+                <input class="input" id="auto-interval" type="number" min="60" step="60" placeholder="seconds" />
+                <span class="small">StartInterval</span>
+              </div>
+              <div class="row hidden" id="auto-daily-row">
+                <input class="input" id="auto-hour" type="number" min="0" max="23" placeholder="hour" />
+                <input class="input" id="auto-minute" type="number" min="0" max="59" placeholder="minute" />
+                <span class="small">local time</span>
+              </div>
+              <div class="row hidden" id="auto-weekly-row">
+                <select class="input" id="auto-weekday">
+                  <option value="1">Sun</option>
+                  <option value="2">Mon</option>
+                  <option value="3">Tue</option>
+                  <option value="4">Wed</option>
+                  <option value="5">Thu</option>
+                  <option value="6">Fri</option>
+                  <option value="7">Sat</option>
+                </select>
+                <input class="input" id="auto-weekly-hour" type="number" min="0" max="23" placeholder="hour" />
+                <input class="input" id="auto-weekly-minute" type="number" min="0" max="59" placeholder="minute" />
+              </div>
+              <textarea class="inputarea" id="auto-prompt" placeholder="Prompt..." spellcheck="false"></textarea>
+              <div class="row">
+                <button class="btn primary" id="btn-auto-save">Save automation</button>
+              </div>
             </div>
-            <div class="list" id="approvals"></div>
 
-            <div class="hr"></div>
-
-            <div class="row">
-              <select class="input" id="share-scope">
-                <option value="collaborator">collaborator</option>
-                <option value="viewer">viewer</option>
-              </select>
-              <input class="input" id="share-label" type="text" placeholder="label (optional)" />
-              <button class="btn" id="btn-mint">Mint token</button>
-              <button class="btn" id="btn-deploy">Deploy (Beta)</button>
+            <div class="panel hidden" data-panel="skills">
+              <div class="row">
+                <button class="btn" id="btn-skills-refresh">Refresh</button>
+                <span class="small">Managed in <span class="mono">.opencode/skills/</span></span>
+              </div>
+              <div class="list" id="skills"></div>
             </div>
-            <div class="small">Minting tokens requires an owner token (or host access).</div>
 
-            <div class="hr"></div>
-
-            <div class="row">
-              <button class="btn" id="btn-share">Connect artifact (current token)</button>
-              <button class="btn" id="btn-copy">Copy JSON</button>
+            <div class="panel hidden" data-panel="plugins">
+              <div class="row">
+                <input class="input" id="plugin-spec" type="text" placeholder="plugin spec" />
+                <button class="btn" id="btn-plugin-add">Add</button>
+                <button class="btn" id="btn-plugins-refresh">Refresh</button>
+              </div>
+              <div class="list" id="plugins"></div>
             </div>
-            <div class="codebox" id="connect"></div>
+
+            <div class="panel hidden" data-panel="apps">
+              <div class="row">
+                <button class="btn" id="btn-mcp-refresh">Refresh</button>
+                <span class="small">MCP servers from <span class="mono">opencode.json</span></span>
+              </div>
+              <div class="list" id="mcp"></div>
+            </div>
+
+            <div class="panel hidden" data-panel="config">
+              <div class="row">
+                <input id="file" type="file" />
+                <button class="btn" id="btn-upload">Upload to inbox</button>
+              </div>
+              <div class="small">Uploads go to <span class="mono">.opencode/openwork/inbox/</span> inside the workspace.</div>
+
+              <div class="hr"></div>
+
+              <div class="row">
+                <button class="btn" id="btn-artifacts">List artifacts</button>
+                <span class="small">Downloads read from <span class="mono">.opencode/openwork/outbox/</span>.</span>
+              </div>
+              <div class="list" id="artifacts"></div>
+
+              <div class="hr"></div>
+
+              <div class="row">
+                <button class="btn" id="btn-approvals">Refresh approvals</button>
+                <span class="small">(Owner or host token required)</span>
+              </div>
+              <div class="list" id="approvals"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -397,12 +543,35 @@ const fileInjectionEl = qs("#file-injection");
 const artifactsEl = qs("#artifacts");
 const approvalsEl = qs("#approvals");
 const connectEl = qs("#connect");
+const tokensEl = qs("#tokens");
+const exportEl = qs("#export");
+const importEl = qs("#import");
+const automationsEl = qs("#automations");
+const skillsEl = qs("#skills");
+const pluginsEl = qs("#plugins");
+const pluginSpecEl = qs("#plugin-spec");
+const mcpEl = qs("#mcp");
 const hostIdEl = qs("#host-id");
 const pillRun = qs("#pill-run");
 const timelineEl = qs("#timeline");
 const workspaceUrlEl = qs("#workspace-url");
 const shareScopeEl = qs("#share-scope");
 const shareLabelEl = qs("#share-label");
+const tabsEl = qs("#tabs");
+
+const autoNameEl = qs("#auto-name");
+const autoKindEl = qs("#auto-kind");
+const autoIntervalEl = qs("#auto-interval");
+const autoHourEl = qs("#auto-hour");
+const autoMinuteEl = qs("#auto-minute");
+const autoWeekdayEl = qs("#auto-weekday");
+const autoWeeklyHourEl = qs("#auto-weekly-hour");
+const autoWeeklyMinuteEl = qs("#auto-weekly-minute");
+const autoPromptEl = qs("#auto-prompt");
+const autoIntervalRow = qs("#auto-interval-row");
+const autoDailyRow = qs("#auto-daily-row");
+const autoWeeklyRow = qs("#auto-weekly-row");
+const autoLogEl = qs("#auto-log");
 
 const STORAGE_TOKEN = "openwork.toy.token";
 const STORAGE_SESSION_PREFIX = "openwork.toy.session.";
@@ -469,6 +638,25 @@ function addCheckpoint(label, detail) {
   while (timelineEl.children.length > 80) {
     timelineEl.removeChild(timelineEl.firstChild);
   }
+}
+
+let activeTab = "share";
+
+function setTab(tab) {
+  activeTab = tab;
+  if (tabsEl) {
+    const buttons = tabsEl.querySelectorAll(".tab");
+    buttons.forEach((btn) => {
+      const t = btn.getAttribute("data-tab") || "";
+      btn.classList.toggle("active", t === tab);
+    });
+  }
+
+  const panels = document.querySelectorAll(".panel");
+  panels.forEach((panel) => {
+    const t = panel.getAttribute("data-panel") || "";
+    panel.classList.toggle("hidden", t !== tab);
+  });
 }
 
 function getTokenFromHash() {
@@ -914,6 +1102,390 @@ async function mintShareToken(workspaceId) {
   setStatus("Token minted: " + tokenScope, "ok");
 }
 
+async function refreshTokens() {
+  if (!tokensEl) return;
+  tokensEl.innerHTML = "";
+  try {
+    const data = await apiFetch("/tokens");
+    const items = Array.isArray(data && data.items) ? data.items : [];
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "item";
+      empty.textContent = "No tokens.";
+      tokensEl.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "item";
+      const top = document.createElement("div");
+      top.className = "row";
+
+      const left = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "mono";
+      title.textContent = (item.scope ? String(item.scope) : "token") + "  " + (item.id ? String(item.id) : "");
+      const meta = document.createElement("div");
+      meta.className = "small";
+      meta.textContent = item.label ? String(item.label) : "";
+      left.appendChild(title);
+      if (meta.textContent) left.appendChild(meta);
+
+      const revoke = document.createElement("button");
+      revoke.className = "btn danger";
+      revoke.textContent = "Revoke";
+      revoke.onclick = async () => {
+        try {
+          await apiFetch("/tokens/" + encodeURIComponent(String(item.id || "")), { method: "DELETE" });
+          await refreshTokens();
+        } catch (e) {
+          setStatus(e && e.message ? e.message : "Revoke failed", "bad");
+        }
+      };
+
+      top.appendChild(left);
+      top.appendChild(revoke);
+      row.appendChild(top);
+      tokensEl.appendChild(row);
+    }
+  } catch (e) {
+    const warn = document.createElement("div");
+    warn.className = "item";
+    warn.textContent = e && e.message ? e.message : "Tokens unavailable";
+    tokensEl.appendChild(warn);
+  }
+}
+
+async function exportWorkspace(workspaceId) {
+  if (!exportEl) return;
+  exportEl.textContent = "";
+  const data = await apiFetch("/workspace/" + encodeURIComponent(workspaceId) + "/export");
+  exportEl.textContent = JSON.stringify(data, null, 2);
+}
+
+async function importWorkspace(workspaceId) {
+  if (!importEl) return;
+  const raw = (importEl.value || "").trim();
+  if (!raw) throw new Error("import_json_missing");
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch { payload = null; }
+  if (!payload) throw new Error("import_json_invalid");
+  await apiFetch("/workspace/" + encodeURIComponent(workspaceId) + "/import", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+function scheduleSummary(schedule) {
+  if (!schedule || typeof schedule !== "object") return "";
+  const kind = String(schedule.kind || "");
+  const pad2 = (n) => String(n).padStart(2, "0");
+  if (kind === "interval") {
+    const seconds = Number(schedule.seconds || 0);
+    return seconds ? ("every " + seconds + "s") : "interval";
+  }
+  if (kind === "daily") {
+    return "daily " + pad2(schedule.hour) + ":" + pad2(schedule.minute);
+  }
+  if (kind === "weekly") {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const weekday = Number(schedule.weekday || 1);
+    const day = days[Math.max(1, Math.min(7, weekday)) - 1] || "?";
+    return "weekly " + day + " " + pad2(schedule.hour) + ":" + pad2(schedule.minute);
+  }
+  return kind || "schedule";
+}
+
+let automationsCache = [];
+
+async function refreshAutomations(workspaceId) {
+  if (!automationsEl) return;
+  if (autoLogEl) autoLogEl.textContent = "";
+  automationsEl.innerHTML = "";
+  try {
+    const data = await apiFetch("/workspace/" + encodeURIComponent(workspaceId) + "/agentlab/automations");
+    const items = Array.isArray(data && data.items) ? data.items : [];
+    automationsCache = items;
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "item";
+      empty.textContent = "No automations yet.";
+      automationsEl.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "item";
+
+      const top = document.createElement("div");
+      top.className = "row";
+
+      const left = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "mono";
+      name.textContent = item.name + "  (" + item.id + ")";
+      const meta = document.createElement("div");
+      meta.className = "small";
+      meta.textContent = (item.enabled ? "enabled" : "disabled") + " - " + scheduleSummary(item.schedule);
+      left.appendChild(name);
+      left.appendChild(meta);
+
+      const buttons = document.createElement("div");
+      buttons.className = "row";
+
+      const runBtn = document.createElement("button");
+      runBtn.className = "btn";
+      runBtn.textContent = "Run";
+      runBtn.onclick = async () => {
+        try {
+          const res = await apiFetch(
+            "/workspace/" + encodeURIComponent(workspaceId) + "/agentlab/automations/" + encodeURIComponent(item.id) + "/run",
+            { method: "POST", body: JSON.stringify({}) },
+          );
+          const sessionId = res && res.sessionId ? String(res.sessionId) : "";
+          if (sessionId) {
+            writeSessionId(workspaceId, sessionId);
+            sessionIdEl.textContent = "session: " + sessionId;
+            await refreshMessages(workspaceId).catch(() => undefined);
+          }
+          setStatus("Automation started", "ok");
+        } catch (e) {
+          setStatus(e && e.message ? e.message : "Automation failed", "bad");
+        }
+      };
+
+      const logBtn = document.createElement("button");
+      logBtn.className = "btn";
+      logBtn.textContent = "Logs";
+      logBtn.onclick = async () => {
+        if (!autoLogEl) return;
+        autoLogEl.textContent = "";
+        try {
+          const data = await apiFetch(
+            "/workspace/" + encodeURIComponent(workspaceId) + "/agentlab/automations/logs/" + encodeURIComponent(item.id),
+          );
+          autoLogEl.textContent = data && data.content ? String(data.content) : "";
+        } catch (e) {
+          autoLogEl.textContent = e && e.message ? e.message : "Log not available";
+        }
+      };
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn danger";
+      delBtn.textContent = "Delete";
+      delBtn.onclick = async () => {
+        try {
+          await apiFetch(
+            "/workspace/" + encodeURIComponent(workspaceId) + "/agentlab/automations/" + encodeURIComponent(item.id),
+            { method: "DELETE" },
+          );
+          await refreshAutomations(workspaceId);
+        } catch (e) {
+          setStatus(e && e.message ? e.message : "Delete failed", "bad");
+        }
+      };
+
+      buttons.appendChild(runBtn);
+      buttons.appendChild(logBtn);
+      buttons.appendChild(delBtn);
+
+      top.appendChild(left);
+      top.appendChild(buttons);
+      row.appendChild(top);
+      automationsEl.appendChild(row);
+    }
+  } catch (e) {
+    const warn = document.createElement("div");
+    warn.className = "item";
+    warn.textContent = e && e.message ? e.message : "Automations unavailable";
+    automationsEl.appendChild(warn);
+  }
+}
+
+function updateAutomationScheduleUI() {
+  const kind = autoKindEl && autoKindEl.value ? String(autoKindEl.value) : "interval";
+  if (autoIntervalRow) autoIntervalRow.classList.toggle("hidden", kind !== "interval");
+  if (autoDailyRow) autoDailyRow.classList.toggle("hidden", kind !== "daily");
+  if (autoWeeklyRow) autoWeeklyRow.classList.toggle("hidden", kind !== "weekly");
+}
+
+async function saveAutomation(workspaceId) {
+  const name = autoNameEl && autoNameEl.value ? String(autoNameEl.value).trim() : "";
+  const prompt = autoPromptEl && autoPromptEl.value ? String(autoPromptEl.value).trim() : "";
+  if (!name) throw new Error("name_required");
+  if (!prompt) throw new Error("prompt_required");
+  const kind = autoKindEl && autoKindEl.value ? String(autoKindEl.value) : "interval";
+  let schedule = null;
+  if (kind === "interval") {
+    schedule = { kind: "interval", seconds: Number(autoIntervalEl && autoIntervalEl.value ? autoIntervalEl.value : 3600) };
+  } else if (kind === "daily") {
+    schedule = {
+      kind: "daily",
+      hour: Number(autoHourEl && autoHourEl.value ? autoHourEl.value : 9),
+      minute: Number(autoMinuteEl && autoMinuteEl.value ? autoMinuteEl.value : 0),
+    };
+  } else {
+    schedule = {
+      kind: "weekly",
+      weekday: Number(autoWeekdayEl && autoWeekdayEl.value ? autoWeekdayEl.value : 2),
+      hour: Number(autoWeeklyHourEl && autoWeeklyHourEl.value ? autoWeeklyHourEl.value : 9),
+      minute: Number(autoWeeklyMinuteEl && autoWeeklyMinuteEl.value ? autoWeeklyMinuteEl.value : 0),
+    };
+  }
+  await apiFetch("/workspace/" + encodeURIComponent(workspaceId) + "/agentlab/automations", {
+    method: "POST",
+    body: JSON.stringify({ name, prompt, enabled: true, schedule }),
+  });
+}
+
+async function refreshSkills(workspaceId) {
+  if (!skillsEl) return;
+  skillsEl.innerHTML = "";
+  try {
+    const data = await apiFetch("/workspace/" + encodeURIComponent(workspaceId) + "/skills");
+    const items = Array.isArray(data && data.items) ? data.items : [];
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "item";
+      empty.textContent = "No skills found.";
+      skillsEl.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "item";
+      const top = document.createElement("div");
+      top.className = "row";
+      const left = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "mono";
+      name.textContent = item.name;
+      const meta = document.createElement("div");
+      meta.className = "small";
+      meta.textContent = item.description || (item.scope ? String(item.scope) : "");
+      left.appendChild(name);
+      if (meta.textContent) left.appendChild(meta);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn danger";
+      delBtn.textContent = "Delete";
+      delBtn.disabled = item.scope !== "project";
+      delBtn.onclick = async () => {
+        try {
+          await apiFetch(
+            "/workspace/" + encodeURIComponent(workspaceId) + "/skills/" + encodeURIComponent(item.name),
+            { method: "DELETE" },
+          );
+          await refreshSkills(workspaceId);
+        } catch (e) {
+          setStatus(e && e.message ? e.message : "Delete failed", "bad");
+        }
+      };
+
+      top.appendChild(left);
+      top.appendChild(delBtn);
+      row.appendChild(top);
+      skillsEl.appendChild(row);
+    }
+  } catch (e) {
+    const warn = document.createElement("div");
+    warn.className = "item";
+    warn.textContent = e && e.message ? e.message : "Skills unavailable";
+    skillsEl.appendChild(warn);
+  }
+}
+
+async function refreshPlugins(workspaceId) {
+  if (!pluginsEl) return;
+  pluginsEl.innerHTML = "";
+  try {
+    const data = await apiFetch("/workspace/" + encodeURIComponent(workspaceId) + "/plugins");
+    const items = Array.isArray(data && data.items) ? data.items : [];
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "item";
+      empty.textContent = "No plugins.";
+      pluginsEl.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "item";
+      const top = document.createElement("div");
+      top.className = "row";
+      const left = document.createElement("div");
+      const spec = document.createElement("div");
+      spec.className = "mono";
+      spec.textContent = item.spec;
+      const meta = document.createElement("div");
+      meta.className = "small";
+      meta.textContent = (item.source ? String(item.source) : "") + (item.scope ? " / " + String(item.scope) : "");
+      left.appendChild(spec);
+      if (meta.textContent) left.appendChild(meta);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn danger";
+      delBtn.textContent = "Remove";
+      delBtn.disabled = item.source !== "config";
+      delBtn.onclick = async () => {
+        try {
+          await apiFetch(
+            "/workspace/" + encodeURIComponent(workspaceId) + "/plugins/" + encodeURIComponent(item.spec),
+            { method: "DELETE" },
+          );
+          await refreshPlugins(workspaceId);
+        } catch (e) {
+          setStatus(e && e.message ? e.message : "Remove failed", "bad");
+        }
+      };
+
+      top.appendChild(left);
+      top.appendChild(delBtn);
+      row.appendChild(top);
+      pluginsEl.appendChild(row);
+    }
+  } catch (e) {
+    const warn = document.createElement("div");
+    warn.className = "item";
+    warn.textContent = e && e.message ? e.message : "Plugins unavailable";
+    pluginsEl.appendChild(warn);
+  }
+}
+
+async function refreshMcp(workspaceId) {
+  if (!mcpEl) return;
+  mcpEl.innerHTML = "";
+  try {
+    const data = await apiFetch("/workspace/" + encodeURIComponent(workspaceId) + "/mcp");
+    const items = Array.isArray(data && data.items) ? data.items : [];
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "item";
+      empty.textContent = "No MCP servers.";
+      mcpEl.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "item";
+      const name = document.createElement("div");
+      name.className = "mono";
+      name.textContent = item.name;
+      const meta = document.createElement("div");
+      meta.className = "small";
+      meta.textContent = item.disabledByTools ? "disabled" : "enabled";
+      row.appendChild(name);
+      row.appendChild(meta);
+      mcpEl.appendChild(row);
+    }
+  } catch (e) {
+    const warn = document.createElement("div");
+    warn.className = "item";
+    warn.textContent = e && e.message ? e.message : "MCP unavailable";
+    mcpEl.appendChild(warn);
+  }
+}
+
 async function copyConnectArtifact() {
   const text = connectEl.textContent || "";
   if (!text.trim()) return;
@@ -958,6 +1530,30 @@ async function main() {
   await refreshHost(workspaceId);
   sessionIdEl.textContent = readSessionId(workspaceId) ? ("session: " + readSessionId(workspaceId)) : "session: -";
   await refreshMessages(workspaceId).catch(() => undefined);
+
+  setTab(activeTab);
+  if (tabsEl) {
+    const buttons = tabsEl.querySelectorAll(".tab");
+    buttons.forEach((btn) => {
+      btn.onclick = async () => {
+        const tab = btn.getAttribute("data-tab") || "share";
+        setTab(tab);
+        try {
+          if (tab === "automations") await refreshAutomations(workspaceId);
+          if (tab === "skills") await refreshSkills(workspaceId);
+          if (tab === "plugins") await refreshPlugins(workspaceId);
+          if (tab === "apps") await refreshMcp(workspaceId);
+          if (tab === "share") await refreshTokens().catch(() => undefined);
+        } catch {
+          // ignore
+        }
+      };
+    });
+  }
+  if (autoKindEl) {
+    autoKindEl.onchange = () => updateAutomationScheduleUI();
+    updateAutomationScheduleUI();
+  }
 
   qs("#btn-new").onclick = async () => {
     try {
@@ -1072,6 +1668,75 @@ async function main() {
 
   qs("#btn-copy").onclick = async () => {
     await copyConnectArtifact();
+  };
+
+  qs("#btn-tokens").onclick = async () => {
+    await refreshTokens().catch((e) => setStatus(e && e.message ? e.message : "tokens failed", "bad"));
+  };
+
+  qs("#btn-export").onclick = async () => {
+    try {
+      await exportWorkspace(workspaceId);
+      setStatus("Exported", "ok");
+    } catch (e) {
+      setStatus(e && e.message ? e.message : "export failed", "bad");
+    }
+  };
+
+  qs("#btn-import").onclick = async () => {
+    try {
+      await importWorkspace(workspaceId);
+      setStatus("Import requested (check approvals)", "ok");
+    } catch (e) {
+      setStatus(e && e.message ? e.message : "import failed", "bad");
+    }
+  };
+
+  qs("#btn-auto-refresh").onclick = async () => {
+    await refreshAutomations(workspaceId).catch((e) => setStatus(e && e.message ? e.message : "automations failed", "bad"));
+  };
+
+  qs("#btn-auto-save").onclick = async () => {
+    try {
+      await saveAutomation(workspaceId);
+      if (autoNameEl) autoNameEl.value = "";
+      if (autoPromptEl) autoPromptEl.value = "";
+      await refreshAutomations(workspaceId);
+      setStatus("Automation saved (apply schedule on host)", "ok");
+    } catch (e) {
+      setStatus(e && e.message ? e.message : "automation save failed", "bad");
+    }
+  };
+
+  qs("#btn-skills-refresh").onclick = async () => {
+    await refreshSkills(workspaceId).catch((e) => setStatus(e && e.message ? e.message : "skills failed", "bad"));
+  };
+
+  qs("#btn-plugins-refresh").onclick = async () => {
+    await refreshPlugins(workspaceId).catch((e) => setStatus(e && e.message ? e.message : "plugins failed", "bad"));
+  };
+
+  qs("#btn-plugin-add").onclick = async () => {
+    const spec = pluginSpecEl && pluginSpecEl.value ? String(pluginSpecEl.value).trim() : "";
+    if (!spec) {
+      setStatus("plugin spec required", "bad");
+      return;
+    }
+    try {
+      await apiFetch("/workspace/" + encodeURIComponent(workspaceId) + "/plugins", {
+        method: "POST",
+        body: JSON.stringify({ spec }),
+      });
+      if (pluginSpecEl) pluginSpecEl.value = "";
+      await refreshPlugins(workspaceId);
+      setStatus("Plugin added", "ok");
+    } catch (e) {
+      setStatus(e && e.message ? e.message : "plugin add failed", "bad");
+    }
+  };
+
+  qs("#btn-mcp-refresh").onclick = async () => {
+    await refreshMcp(workspaceId).catch((e) => setStatus(e && e.message ? e.message : "mcp failed", "bad"));
   };
 }
 
