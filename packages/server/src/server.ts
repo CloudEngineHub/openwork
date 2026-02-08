@@ -5,7 +5,7 @@ import type { ApprovalRequest, Capabilities, ServerConfig, WorkspaceInfo, Actor,
 import { ApprovalService } from "./approvals.js";
 import { addPlugin, listPlugins, normalizePluginSpec, removePlugin } from "./plugins.js";
 import { addMcp, listMcp, removeMcp } from "./mcp.js";
-import { listSkills, upsertSkill } from "./skills.js";
+import { deleteSkill, listSkills, upsertSkill } from "./skills.js";
 import { deleteCommand, listCommands, upsertCommand } from "./commands.js";
 import { deleteScheduledJob, listScheduledJobs, resolveScheduledJob } from "./scheduler.js";
 import { ApiError, formatError } from "./errors.js";
@@ -126,6 +126,30 @@ function parseWorkspaceMount(pathname: string): { workspaceId: string; restPath:
   return { workspaceId: decodeURIComponent(workspaceId), restPath };
 }
 
+function normalizeOpencodeProxyPath(proxyPath: string): string {
+  const raw = (proxyPath ?? "").trim() || "/";
+  const withoutPrefix = raw.startsWith("/opencode") ? raw.slice("/opencode".length) : raw;
+  const normalized = (withoutPrefix || "/").replace(/\/+$/, "");
+  return normalized || "/";
+}
+
+function assertOpencodeProxyAllowed(actor: Actor, method: string, proxyPath: string) {
+  const m = method.toUpperCase();
+  const scope = actor.scope ?? "viewer";
+
+  if (scope === "viewer" && m !== "GET" && m !== "HEAD") {
+    throw new ApiError(403, "forbidden", "Viewer tokens are read-only");
+  }
+
+  // Prevent collaborators/viewers from self-approving OpenCode permission requests via the proxy.
+  if (scope !== "owner" && m !== "GET" && m !== "HEAD") {
+    const normalized = normalizeOpencodeProxyPath(proxyPath);
+    if (/\/permission\/[^/]+\/reply$/.test(normalized)) {
+      throw new ApiError(403, "forbidden", "Only owner tokens can reply to permission requests");
+    }
+  }
+}
+
 interface Route {
   method: string;
   regex: RegExp;
@@ -193,10 +217,7 @@ export function startServer(config: ServerConfig) {
         authMode = "client";
         try {
           const actor = await requireClient(request, config, tokens);
-          const method = request.method.toUpperCase();
-          if (actor.scope === "viewer" && method !== "GET" && method !== "HEAD") {
-            throw new ApiError(403, "forbidden", "Viewer tokens are read-only");
-          }
+          assertOpencodeProxyAllowed(actor, request.method, mount.restPath);
           const workspace = await resolveWorkspace(config, mount.workspaceId);
           proxyService = "opencode";
           proxyBaseUrl = workspace.baseUrl?.trim() || undefined;
@@ -257,10 +278,7 @@ export function startServer(config: ServerConfig) {
         proxyBaseUrl = config.workspaces[0]?.baseUrl?.trim() || undefined;
         try {
           const actor = await requireClient(request, config, tokens);
-          const method = request.method.toUpperCase();
-          if (actor.scope === "viewer" && method !== "GET" && method !== "HEAD") {
-            throw new ApiError(403, "forbidden", "Viewer tokens are read-only");
-          }
+          assertOpencodeProxyAllowed(actor, request.method, url.pathname);
           proxyService = "opencode";
           const response = await proxyOpencodeRequest({ request, url, workspace: config.workspaces[0] });
           return finalize(response);
@@ -1191,7 +1209,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     headers.set("Content-Type", "application/octet-stream");
     headers.set("Content-Length", String(info.size));
     headers.set("Content-Disposition", `attachment; filename="${basename(relativePath)}"`);
-    return new Response(Bun.file(absPath), { status: 200, headers });
+    return new Response((Bun as any).file(absPath), { status: 200, headers });
   });
 
   addRoute(routes, "GET", "/workspace/:id/plugins", "client", async (ctx) => {
@@ -1322,6 +1340,39 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       path: result.path,
     });
     return jsonResponse({ name, path: result.path, description: description ?? "", scope: "project" });
+  });
+
+  addRoute(routes, "DELETE", "/workspace/:id/skills/:name", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const name = String(ctx.params.name ?? "").trim();
+    if (!name) {
+      throw new ApiError(400, "invalid_skill_name", "Skill name is required");
+    }
+    await requireApproval(ctx, {
+      workspaceId: workspace.id,
+      action: "skills.delete",
+      summary: `Delete skill ${name}`,
+      paths: [join(workspace.path, ".opencode", "skills", name)],
+    });
+    const result = await deleteSkill(workspace.path, name);
+    await recordAudit(workspace.path, {
+      id: shortId(),
+      workspaceId: workspace.id,
+      actor: ctx.actor ?? { type: "remote" },
+      action: "skills.delete",
+      target: result.path,
+      summary: `Deleted skill ${name}`,
+      timestamp: Date.now(),
+    });
+    emitReloadEvent(ctx.reloadEvents, workspace, "skills", {
+      type: "skill",
+      name,
+      action: "removed",
+      path: result.path,
+    });
+    return jsonResponse({ ok: true, name, path: result.path });
   });
 
   addRoute(routes, "GET", "/workspace/:id/mcp", "client", async (ctx) => {
