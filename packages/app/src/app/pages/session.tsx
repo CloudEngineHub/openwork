@@ -2150,6 +2150,7 @@ export default function SessionView(props: SessionViewProps) {
           clientConnected={props.clientConnected}
           openworkServerStatus={props.openworkServerStatus}
           developerMode={props.developerMode}
+          allowMcpTips={false}
           onOpenSettings={() => openSettings("general")}
           onOpenMessaging={openConfig}
           onOpenProviders={openProviderAuth}

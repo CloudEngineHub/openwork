@@ -12,6 +12,8 @@ type StatusBarProps = {
   clientConnected: boolean;
   openworkServerStatus: OpenworkServerStatus;
   developerMode: boolean;
+  /** If true, the rotating tip bubble may include MCP connection CTAs (e.g., Notion). */
+  allowMcpTips?: boolean;
   onOpenSettings: () => void;
   onOpenMessaging: () => void;
   onOpenProviders: () => Promise<void> | void;
@@ -98,7 +100,7 @@ export default function StatusBar(props: StatusBarProps) {
     {
       id: "notion",
       label: "Connect Notion MCP",
-      enabled: () => notionStatus() !== "connected",
+      enabled: () => Boolean(props.allowMcpTips) && notionStatus() !== "connected",
       action: () => runAction(props.onOpenMcp),
     },
     {
