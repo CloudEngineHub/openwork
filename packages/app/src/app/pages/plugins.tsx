@@ -96,6 +96,9 @@ export default function PluginsView(props: PluginsViewProps) {
 
         <div class="space-y-3">
           <div class="text-xs font-medium text-gray-11 uppercase tracking-wider">Suggested plugins</div>
+          <div class="text-xs text-gray-10">
+            Use <span class="font-medium text-gray-11">Setup</span> for plugins that require local companion install steps.
+          </div>
           <div class="grid gap-3">
             <For each={props.suggestedPlugins}>
               {(plugin) => {

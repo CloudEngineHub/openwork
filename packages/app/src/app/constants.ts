@@ -14,6 +14,45 @@ export const DEFAULT_MODEL: ModelRef = {
 
 export const SUGGESTED_PLUGINS: SuggestedPlugin[] = [
   {
+    name: "OpenCode Browser Automation",
+    packageName: "@different-ai/opencode-browser",
+    description:
+      "Control real browser tabs from OpenWork. Includes a guided setup flow for unpacked extension installs while the store listing is pending.",
+    tags: ["browser", "automation", "guided"],
+    aliases: ["opencode-browser"],
+    installMode: "guided",
+    steps: [
+      {
+        title: "Add plugin",
+        description:
+          "Click Add on this card to include @different-ai/opencode-browser in your OpenCode plugin config.",
+      },
+      {
+        title: "Run installer",
+        description:
+          "In your workspace terminal, run the installer. This path does not require Chrome Web Store approval.",
+        command: "bunx @different-ai/opencode-browser@latest install",
+      },
+      {
+        title: "Load unpacked extension",
+        description:
+          "Open chrome://extensions, enable Developer mode, click Load unpacked, then select the extension folder.",
+        path: "~/.opencode-browser/extension",
+        note: "The installer writes the native host manifest and prompts for the extension ID when needed.",
+      },
+      {
+        title: "Verify in OpenWork",
+        description: "Start a session and run a quick check command to confirm browser automation is connected.",
+        command: "use browser_status",
+      },
+      {
+        title: "Keep it updated",
+        description: "After updates, refresh the local files and reload the extension from chrome://extensions.",
+        command: "bunx @different-ai/opencode-browser@latest update",
+      },
+    ],
+  },
+  {
     name: "opencode-scheduler",
     packageName: "opencode-scheduler",
     description: "Run scheduled jobs with the OpenCode scheduler plugin.",
