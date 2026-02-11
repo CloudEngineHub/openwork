@@ -748,6 +748,15 @@ async function resolvePort(preferred: number | undefined, host: string, fallback
   return findFreePort(host);
 }
 
+function isCompiledBunBinary(): boolean {
+  try {
+    const entryPath = fileURLToPath(import.meta.url);
+    return entryPath.startsWith("/$bunfs/");
+  } catch {
+    return false;
+  }
+}
+
 function resolveLanIp(): string | null {
   const interfaces = networkInterfaces();
   for (const key of Object.keys(interfaces)) {
@@ -4054,9 +4063,15 @@ async function runStart(args: ParsedArgs) {
   const verbose = readBool(args.flags, "verbose", false, "OPENWRK_VERBOSE");
   const logFormat = readLogFormat(args.flags, "log-format", "pretty", "OPENWRK_LOG_FORMAT");
   const detachRequested = readBool(args.flags, "detach", false, "OPENWRK_DETACH");
-  const defaultTui = process.stdout.isTTY && !outputJson && !checkOnly && !checkEvents;
+  const compiledBinary = isCompiledBunBinary();
+  const defaultTui = process.stdout.isTTY && !outputJson && !checkOnly && !checkEvents && !compiledBinary;
   const tuiRequested = readBool(args.flags, "tui", defaultTui);
-  const useTui = tuiRequested && !detachRequested && !outputJson && !checkOnly && !checkEvents && logFormat === "pretty";
+  const useTui = !compiledBinary && tuiRequested && !detachRequested && !outputJson && !checkOnly && !checkEvents && logFormat === "pretty";
+  if (compiledBinary && tuiRequested && !outputJson) {
+    console.error(
+      "[openwrk] TUI is disabled for compiled binaries. Falling back to plain output; use source mode (`pnpm --filter openwrk dev -- start`) for TUI.",
+    );
+  }
   const colorEnabled =
     !useTui && readBool(args.flags, "color", process.stdout.isTTY, "OPENWRK_COLOR") && !process.env.NO_COLOR;
   const runId = readFlag(args.flags, "run-id") ?? process.env.OPENWRK_RUN_ID ?? randomUUID();
