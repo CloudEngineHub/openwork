@@ -50,9 +50,9 @@ From this directory:
 docker compose up --build
 ```
 
-Then open:
+Then verify health and connect with the OpenWork app:
 
-- `http://127.0.0.1:8787/ui`
+- `http://127.0.0.1:8787/health`
 
 ### Config
 

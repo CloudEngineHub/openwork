@@ -113,11 +113,7 @@ Inbox/outbox:
 - `GET /workspace/:id/artifacts`
 - `GET /workspace/:id/artifacts/:artifactId`
 
-Toy UI (static assets served by the server):
-
-- `GET /ui`
-- `GET /w/:id/ui`
-- `GET /ui/assets/*`
+The server does not provide a built-in HTML UI. Use the OpenWork app (desktop/web) as the client.
 
 OpenCode proxy:
 
