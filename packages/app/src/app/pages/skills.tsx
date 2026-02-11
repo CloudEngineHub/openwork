@@ -31,62 +31,6 @@ export type SkillsViewProps = {
   setPrompt: (value: string) => void;
 };
 
-const AGENT_PALETTES = [
-  { shell: "#eef2ff", face: "#4338ca", accent: "#1e1b4b", glow: "rgba(67,56,202,0.25)" },
-  { shell: "#ecfeff", face: "#0f766e", accent: "#134e4a", glow: "rgba(15,118,110,0.25)" },
-  { shell: "#eff6ff", face: "#2563eb", accent: "#1e3a8a", glow: "rgba(37,99,235,0.22)" },
-  { shell: "#f5f3ff", face: "#7c3aed", accent: "#4c1d95", glow: "rgba(124,58,237,0.22)" },
-];
-
-function hashSeed(input: string): number {
-  let hash = 0;
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash << 5) - hash + input.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function AgentAvatar(props: { seed: string }) {
-  const config = createMemo(() => {
-    const hash = hashSeed(props.seed || "openwork-worker");
-    return {
-      palette: AGENT_PALETTES[hash % AGENT_PALETTES.length],
-      roundness: hash % 2 === 0 ? 22 : 15,
-      eyeY: hash % 2 === 0 ? 21 : 22,
-      smile: hash % 3 !== 0,
-      antenna: hash % 4 === 0,
-      dots: hash % 2 === 1,
-    };
-  });
-
-  return (
-    <div class="relative h-16 w-16 shrink-0 rounded-2xl border border-dls-border bg-dls-surface p-1 shadow-[0_10px_32px_rgba(0,0,0,0.08)]">
-      <svg viewBox="0 0 64 64" class="h-full w-full" aria-hidden="true">
-        <rect x="4" y="4" width="56" height="56" rx={config().roundness} fill={config().palette.shell} />
-        <rect x="17" y="15" width="30" height="31" rx="12" fill={config().palette.face} />
-        <circle cx="26" cy={config().eyeY} r="2.4" fill="white" />
-        <circle cx="38" cy={config().eyeY} r="2.4" fill="white" />
-        <Show
-          when={config().smile}
-          fallback={<line x1="24" y1="33.5" x2="40" y2="33.5" stroke="white" stroke-width="2.6" stroke-linecap="round" />}
-        >
-          <path d="M23 31.5c2.2 3.8 5.5 5.7 9 5.7s6.8-1.9 9-5.7" fill="none" stroke="white" stroke-width="2.6" stroke-linecap="round" />
-        </Show>
-        <Show when={config().antenna}>
-          <line x1="32" y1="15" x2="32" y2="8" stroke={config().palette.accent} stroke-width="2" stroke-linecap="round" />
-          <circle cx="32" cy="6.5" r="2" fill={config().palette.accent} />
-        </Show>
-        <Show when={config().dots}>
-          <circle cx="20" cy="41" r="1.7" fill={config().palette.accent} opacity="0.45" />
-          <circle cx="44" cy="41" r="1.7" fill={config().palette.accent} opacity="0.45" />
-        </Show>
-      </svg>
-      <div class="pointer-events-none absolute -inset-1 rounded-[18px]" style={{ "box-shadow": `inset 0 0 0 1px ${config().palette.glow}` }} />
-    </div>
-  );
-}
-
 export default function SkillsView(props: SkillsViewProps) {
   // Translation helper that uses current language from i18n
   const translate = (key: string) => t(key, currentLocale());
@@ -315,15 +259,12 @@ export default function SkillsView(props: SkillsViewProps) {
 
       <div class="rounded-2xl border border-dls-border bg-dls-surface px-5 py-5 shadow-[0_8px_26px_rgba(17,24,39,0.05)]">
         <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div class="flex items-center gap-4 min-w-0">
-            <AgentAvatar seed={workspaceLabel()} />
-            <div class="min-w-0 space-y-1">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-dls-secondary">Worker profile</div>
-              <div class="text-xl font-semibold text-dls-text truncate">{workspaceLabel()}</div>
-              <p class="text-sm text-dls-secondary">
-                Skills are the core abilities of this worker. Add from Hub or create new ones directly in chat.
-              </p>
-            </div>
+          <div class="min-w-0 space-y-1">
+            <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-dls-secondary">Worker profile</div>
+            <div class="text-xl font-semibold text-dls-text truncate">{workspaceLabel()}</div>
+            <p class="text-sm text-dls-secondary">
+              Skills are the core abilities of this worker. Add from Hub or create new ones directly in chat.
+            </p>
           </div>
           <button
             type="button"
