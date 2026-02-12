@@ -2397,7 +2397,6 @@ export default function App() {
 
   const UPDATE_AUTO_CHECK_EVERY_MS = 12 * 60 * 60_000;
   const UPDATE_AUTO_CHECK_POLL_MS = 60_000;
-  let startupAutoUpdateCheckDone = false;
 
   const getUpdateLastCheckedAt = (state: ReturnType<typeof updateStatus>) => {
     if (state.state === "checking") return null;
@@ -4425,9 +4424,7 @@ export default function App() {
       if (!updateAutoCheck()) return;
       const state = updateStatus();
       if (state.state === "checking" || state.state === "downloading") return;
-      const forceStartupCheck = !startupAutoUpdateCheckDone;
-      if (!forceStartupCheck && !shouldAutoCheckForUpdates()) return;
-      startupAutoUpdateCheckDone = true;
+      if (!shouldAutoCheckForUpdates()) return;
       checkForUpdates({ quiet: true }).catch(() => undefined);
     };
 
