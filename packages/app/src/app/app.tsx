@@ -248,9 +248,11 @@ export default function App() {
   const [rememberStartupChoice, setRememberStartupChoice] = createSignal(false);
   const [themeMode, setThemeMode] = createSignal<ThemeMode>(getInitialThemeMode());
 
-  const [engineSource, setEngineSource] = createSignal<"path" | "sidecar">(
+  const [engineSource, setEngineSource] = createSignal<"path" | "sidecar" | "custom">(
     isTauriRuntime() ? "sidecar" : "path"
   );
+
+  const [engineCustomBinPath, setEngineCustomBinPath] = createSignal("");
 
   const [engineRuntime, setEngineRuntime] = createSignal<EngineRuntime>("openwrk");
 
@@ -1585,6 +1587,7 @@ export default function App() {
     refreshSkills,
     refreshPlugins,
     engineSource,
+    engineCustomBinPath,
     setEngineSource,
     setView,
     setTab,
@@ -3528,8 +3531,22 @@ export default function App() {
         const storedEngineSource = window.localStorage.getItem(
           "openwork.engineSource"
         );
-        if (storedEngineSource === "path" || storedEngineSource === "sidecar") {
-          setEngineSource(storedEngineSource);
+        const storedEngineCustomBinPath = window.localStorage.getItem(
+          "openwork.engineCustomBinPath"
+        );
+        if (storedEngineCustomBinPath) {
+          setEngineCustomBinPath(storedEngineCustomBinPath);
+        }
+        if (
+          storedEngineSource === "path" ||
+          storedEngineSource === "sidecar" ||
+          storedEngineSource === "custom"
+        ) {
+          if (storedEngineSource === "custom" && !(storedEngineCustomBinPath ?? "").trim()) {
+            setEngineSource(isTauriRuntime() ? "sidecar" : "path");
+          } else {
+            setEngineSource(storedEngineSource);
+          }
         }
 
         const storedEngineRuntime = window.localStorage.getItem(
@@ -3881,6 +3898,20 @@ export default function App() {
     if (typeof window === "undefined") return;
     try {
       window.localStorage.setItem("openwork.engineSource", engineSource());
+    } catch {
+      // ignore
+    }
+  });
+
+  createEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const value = engineCustomBinPath().trim();
+      if (value) {
+        window.localStorage.setItem("openwork.engineCustomBinPath", value);
+      } else {
+        window.localStorage.removeItem("openwork.engineCustomBinPath");
+      }
     } catch {
       // ignore
     }
@@ -4349,6 +4380,8 @@ export default function App() {
       anyActiveRuns: anyActiveRuns(),
       engineSource: engineSource(),
       setEngineSource,
+      engineCustomBinPath: engineCustomBinPath(),
+      setEngineCustomBinPath,
       engineRuntime: engineRuntime(),
       setEngineRuntime,
       isWindows: isWindowsPlatform(),
