@@ -417,8 +417,6 @@ pub fn ensure_workspace_files(workspace_path: &str, preset: &str) -> Result<(), 
         _ => vec![],
     };
 
-    let should_seed_chrome_mcp = matches!(preset, "starter");
-
     if !required_plugins.is_empty() {
         let plugins_value = config
             .get("plugin")
@@ -445,33 +443,6 @@ pub fn ensure_workspace_files(workspace_path: &str, preset: &str) -> Result<(), 
                     merged.into_iter().map(serde_json::Value::String).collect(),
                 ),
             );
-        }
-    }
-
-    if should_seed_chrome_mcp {
-        if let Some(obj) = config.as_object_mut() {
-            let mcp_value = obj
-                .get("mcp")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
-
-            let mut mcp_obj = match mcp_value {
-                serde_json::Value::Object(map) => map,
-                _ => serde_json::Map::new(),
-            };
-
-            if !mcp_obj.contains_key("control-chrome") {
-                mcp_obj.insert(
-                    "control-chrome".to_string(),
-                    serde_json::json!({
-                      "type": "local",
-                      "command": ["chrome-devtools-mcp"]
-                    }),
-                );
-                config_changed = true;
-            }
-
-            obj.insert("mcp".to_string(), serde_json::Value::Object(mcp_obj));
         }
     }
 
