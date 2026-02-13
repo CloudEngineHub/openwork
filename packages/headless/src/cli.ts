@@ -82,8 +82,8 @@ declare const __OPENWRK_VERSION__: string | undefined;
 const DEFAULT_OPENWORK_PORT = 8787;
 const DEFAULT_APPROVAL_TIMEOUT = 30000;
 const DEFAULT_OPENCODE_USERNAME = "opencode";
-const DEFAULT_OPENCODE_HOT_RELOAD_DEBOUNCE_MS = 700;
-const DEFAULT_OPENCODE_HOT_RELOAD_COOLDOWN_MS = 1500;
+const DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_DEBOUNCE_MS = 700;
+const DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_COOLDOWN_MS = 1500;
 
 const SANDBOX_INTERNAL_OPENCODE_PORT = 4096;
 const SANDBOX_INTERNAL_OPENWORK_PORT = DEFAULT_OPENWORK_PORT;
@@ -369,23 +369,23 @@ function readOpencodeHotReload(
   const debounceRaw = readNumber(
     flags,
     "opencode-hot-reload-debounce-ms",
-    defaults?.debounceMs ?? DEFAULT_OPENCODE_HOT_RELOAD_DEBOUNCE_MS,
+    defaults?.debounceMs ?? DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_DEBOUNCE_MS,
     env?.debounceMs,
   );
   const cooldownRaw = readNumber(
     flags,
     "opencode-hot-reload-cooldown-ms",
-    defaults?.cooldownMs ?? DEFAULT_OPENCODE_HOT_RELOAD_COOLDOWN_MS,
+    defaults?.cooldownMs ?? DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_COOLDOWN_MS,
     env?.cooldownMs,
   );
   const debounceMs =
     typeof debounceRaw === "number" && Number.isFinite(debounceRaw) && debounceRaw >= 50
       ? Math.floor(debounceRaw)
-      : DEFAULT_OPENCODE_HOT_RELOAD_DEBOUNCE_MS;
+      : DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_DEBOUNCE_MS;
   const cooldownMs =
     typeof cooldownRaw === "number" && Number.isFinite(cooldownRaw) && cooldownRaw >= 100
       ? Math.floor(cooldownRaw)
-      : DEFAULT_OPENCODE_HOT_RELOAD_COOLDOWN_MS;
+      : DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_COOLDOWN_MS;
   return {
     enabled,
     debounceMs,
@@ -2237,9 +2237,9 @@ async function startOpencode(options: {
       ...(options.username ? { OPENCODE_SERVER_USERNAME: options.username } : {}),
       ...(options.password ? { OPENCODE_SERVER_PASSWORD: options.password } : {}),
       ...(options.configDir ? { OPENCODE_CONFIG_DIR: options.configDir } : {}),
-      OPENCODE_HOT_RELOAD: options.hotReload.enabled ? "1" : "0",
-      OPENCODE_HOT_RELOAD_DEBOUNCE_MS: String(options.hotReload.debounceMs),
-      OPENCODE_HOT_RELOAD_COOLDOWN_MS: String(options.hotReload.cooldownMs),
+      OPENCODE_EXPERIMENTAL_HOT_RELOAD: options.hotReload.enabled ? "1" : "0",
+      OPENCODE_EXPERIMENTAL_HOT_RELOAD_DEBOUNCE_MS: String(options.hotReload.debounceMs),
+      OPENCODE_EXPERIMENTAL_HOT_RELOAD_COOLDOWN_MS: String(options.hotReload.cooldownMs),
       ...(options.owpenbotHealthPort ? { OWPENBOT_HEALTH_PORT: String(options.owpenbotHealthPort) } : {}),
     },
   });
@@ -2609,9 +2609,9 @@ async function writeSandboxEntrypoint(options: {
     `export OPENCODE_CONFIG_DIR=${shQuote(opencodeConfigDir)}`,
     `export OPENCODE_URL=${shQuote(`http://127.0.0.1:${SANDBOX_INTERNAL_OPENCODE_PORT}`)}`,
     `export OPENCODE_CLIENT=openwrk`,
-    `export OPENCODE_HOT_RELOAD=${shQuote(options.opencode.hotReload.enabled ? "1" : "0")}`,
-    `export OPENCODE_HOT_RELOAD_DEBOUNCE_MS=${shQuote(String(options.opencode.hotReload.debounceMs))}`,
-    `export OPENCODE_HOT_RELOAD_COOLDOWN_MS=${shQuote(String(options.opencode.hotReload.cooldownMs))}`,
+    `export OPENCODE_EXPERIMENTAL_HOT_RELOAD=${shQuote(options.opencode.hotReload.enabled ? "1" : "0")}`,
+    `export OPENCODE_EXPERIMENTAL_HOT_RELOAD_DEBOUNCE_MS=${shQuote(String(options.opencode.hotReload.debounceMs))}`,
+    `export OPENCODE_EXPERIMENTAL_HOT_RELOAD_COOLDOWN_MS=${shQuote(String(options.opencode.hotReload.cooldownMs))}`,
     `export OPENWORK=1`,
     `export OPENWRK_RUN_ID=${shQuote(options.runId)}`,
     `export OPENWRK_LOG_FORMAT=${shQuote(options.logFormat)}`,
@@ -3661,8 +3661,8 @@ async function runRouterDaemon(args: ParsedArgs) {
     args.flags,
     {
       enabled: true,
-      debounceMs: DEFAULT_OPENCODE_HOT_RELOAD_DEBOUNCE_MS,
-      cooldownMs: DEFAULT_OPENCODE_HOT_RELOAD_COOLDOWN_MS,
+      debounceMs: DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_DEBOUNCE_MS,
+      cooldownMs: DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_COOLDOWN_MS,
     },
     {
       enabled: "OPENWRK_OPENCODE_HOT_RELOAD",
@@ -4264,8 +4264,8 @@ async function runStart(args: ParsedArgs) {
     args.flags,
     {
       enabled: true,
-      debounceMs: DEFAULT_OPENCODE_HOT_RELOAD_DEBOUNCE_MS,
-      cooldownMs: DEFAULT_OPENCODE_HOT_RELOAD_COOLDOWN_MS,
+      debounceMs: DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_DEBOUNCE_MS,
+      cooldownMs: DEFAULT_OPENCODE_EXPERIMENTAL_HOT_RELOAD_COOLDOWN_MS,
     },
     {
       enabled: "OPENWORK_OPENCODE_HOT_RELOAD",
