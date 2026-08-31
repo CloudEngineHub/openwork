@@ -164,6 +164,7 @@ const applicationMenu = createApplicationMenu({
 });
 
 const uiControlServer = createUiControlServer({
+  app,
   appName: APP_NAME,
   appIdentifier: APP_IDENTIFIER,
   getWindow: () => createMainWindow(),

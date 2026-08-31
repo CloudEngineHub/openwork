@@ -8,6 +8,7 @@ import {
   CloudMcpDeliveryStateStore,
   calculateCloudMcpDesiredRevision,
   clearOpenworkCloudMcpProbeFlights,
+  cloudMcpTokenHealthFromConfig,
   OPENWORK_CLOUD_EXPECTED_TOOLS,
   OPENWORK_CLOUD_PLUGIN_CANARIES,
   migrateOpenworkCloudMcpRuntimeConfig,
@@ -324,32 +325,55 @@ describe("cloud MCP health foundation", () => {
     expect(text).toContain("[REDACTED]");
   });
 
-  test("desired revisions detect token metadata change without embedding raw tokens", () => {
+  test("desired revisions detect token changes without exposing reusable auth fingerprints", async () => {
     const config = {
       type: "remote",
       url: "https://api.openworklabs.com/mcp/agent",
       headers: { Authorization: "Bearer owt_super_secret" },
       oauth: false,
     };
-    const first = calculateCloudMcpDesiredRevision(config, {
+    const first = await calculateCloudMcpDesiredRevision(config, {
       token: { present: true, metadata: { expiresAt: "2026-07-13T00:00:00.000Z" } },
       connectCatalogEnabled: true,
       updatedAt: 1,
     });
-    const second = calculateCloudMcpDesiredRevision(config, {
+    const second = await calculateCloudMcpDesiredRevision(config, {
       token: { present: true, metadata: { expiresAt: "2026-07-14T00:00:00.000Z" } },
+      connectCatalogEnabled: true,
+      updatedAt: 1,
+    });
+    const changedToken = await calculateCloudMcpDesiredRevision({
+      ...config,
+      headers: { Authorization: "Bearer owt_different_secret" },
+    }, {
+      token: { present: true, metadata: { expiresAt: "2026-07-13T00:00:00.000Z" } },
       connectCatalogEnabled: true,
       updatedAt: 1,
     });
 
     expect(first).not.toBe(second);
+    expect(first).not.toBe(changedToken);
     expect(first).not.toContain("owt_super_secret");
+  });
+
+  test("token health does not expose an authorization fingerprint", () => {
+    const token = cloudMcpTokenHealthFromConfig({
+      headers: { Authorization: "Bearer owt_super_secret" },
+    }, {
+      expiresAt: "2026-07-13T00:00:00.000Z",
+    });
+
+    expect(token).toEqual({
+      present: true,
+      metadata: { expiresAt: "2026-07-13T00:00:00.000Z" },
+    });
+    expect(JSON.stringify(token)).not.toContain("owt_super_secret");
   });
 
   test("delivery state does not claim applied after revision changes", () => {
     const store = new CloudMcpDeliveryStateStore();
     const metadata = {
-      token: { present: true, metadata: { authorizationHash: "hash_1" } },
+      token: { present: true, metadata: { expiresAt: "2026-07-13T00:00:00.000Z" } },
       connectCatalogEnabled: true,
       updatedAt: 1,
     };
@@ -643,7 +667,7 @@ describe("cloud MCP health foundation", () => {
       connectCatalogEnabled: true,
       updatedAt: Date.now(),
     };
-    const orgARevision = calculateCloudMcpDesiredRevision(changedConfig, orgAMetadata);
+    const orgARevision = await calculateCloudMcpDesiredRevision(changedConfig, orgAMetadata);
     cloudMcpDeliveryState.markDesired(workspaceA, workspaceA.path, orgARevision, orgAMetadata);
     const orgAToolIds = harness.blockToolIds();
     const orgInitialize = harness.blockInitialize();
@@ -657,7 +681,7 @@ describe("cloud MCP health foundation", () => {
       connectCatalogEnabled: true,
       updatedAt: Date.now(),
     };
-    const orgBRevision = calculateCloudMcpDesiredRevision(changedConfig, orgBMetadata);
+    const orgBRevision = await calculateCloudMcpDesiredRevision(changedConfig, orgBMetadata);
     cloudMcpDeliveryState.markDesired(workspaceA, workspaceA.path, orgBRevision, orgBMetadata);
     const orgBToolIds = harness.blockToolIds();
     const orgBCheck = harness.read("ws_a");
