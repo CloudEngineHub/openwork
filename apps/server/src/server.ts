@@ -54,6 +54,12 @@ import { recordAudit, readAuditEntries, readLastAudit } from "./audit.js";
 import { ReloadEventStore } from "./events.js";
 import { computeReloadFingerprint } from "./reload-fingerprint.js";
 import { startReloadWatchers } from "./reload-watcher.js";
+import {
+  redactLogAttributes,
+  redactServerLogFileRecord,
+  resolveServerLogFileSink,
+  type ServerLogFileSink,
+} from "./server-log-file.js";
 import { opencodeConfigPath, openworkConfigPath, projectCommandsDir, projectSkillsDir } from "./workspace-files.js";
 import { ensureDir, exists, hashToken, shortId } from "./utils.js";
 import { defaultWorkspaceOpenworkConfig, ensureWorkspaceFiles, readRawOpencodeConfig } from "./workspace-init.js";
@@ -666,7 +672,11 @@ function writeStdoutLogLine(line: string) {
   process.stdout.write(`${line}\n`);
 }
 
-export function createServerLogger(config: ServerConfig, writeLine: ServerLogWriter = writeStdoutLogLine): ServerLogger {
+export function createServerLogger(
+  config: ServerConfig,
+  writeLine: ServerLogWriter = writeStdoutLogLine,
+  fileSink: ServerLogFileSink | null = resolveServerLogFileSink(),
+): ServerLogger {
   const runId = process.env.OPENWORK_RUN_ID ?? shortId();
   const host = hostname().trim();
   const resource: Record<string, string> = {
@@ -700,20 +710,27 @@ export function createServerLogger(config: ServerConfig, writeLine: ServerLogWri
   };
 
   const emit = (level: LogLevel, message: string, attributes?: LogAttributes) => {
-    const merged = { ...baseAttributes, ...(attributes ?? {}) };
-    if (config.logFormat === "json") {
-      const record = {
-        timeUnixNano: toUnixNano(),
-        severityText: level.toUpperCase(),
-        severityNumber: LOG_LEVEL_NUMBERS[level],
-        body: message,
-        attributes: merged,
-        resource,
-      };
-      writeLogLine(JSON.stringify(record));
-      return;
+    const merged = redactLogAttributes({ ...baseAttributes, ...(attributes ?? {}) });
+    const record = {
+      timeUnixNano: toUnixNano(),
+      severityText: level.toUpperCase(),
+      severityNumber: LOG_LEVEL_NUMBERS[level],
+      body: message,
+      attributes: merged,
+      resource,
+    };
+    // The file sink is structured regardless of the stdout format: it exists
+    // so rollover reasons and reload triggers survive a packaged app.
+    if (fileSink) {
+      const secrets = [
+        config.token,
+        config.hostToken,
+        config.opencodePassword ?? "",
+        ...config.workspaces.map((workspace) => workspace.opencodePassword ?? ""),
+      ];
+      fileSink.write(JSON.stringify(redactServerLogFileRecord(record, secrets)));
     }
-    writeLogLine(message);
+    writeLogLine(config.logFormat === "json" ? JSON.stringify(record) : message);
   };
 
   return { log: emit };
