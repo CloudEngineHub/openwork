@@ -149,7 +149,7 @@ export function getSettingsTabDescription(tab: SettingsTab) {
     case "preferences":
       return "Default model, reasoning, and compaction";
     case "permissions":
-      return "How agents run here, authorized folders, and file access";
+      return "Authorized folders and file access";
     case "cloud-account":
       return t("settings.tab_description_cloud_account");
     case "connect":
@@ -189,11 +189,10 @@ export function getWorkspaceSettingsTabs(): SettingsTab[] {
 
 export function getGlobalSettingsTabs(
   developerMode: boolean,
-  capabilities: Pick<PlatformCapabilities, "autoUpdate" | "localRuntimeControl">,
+  capabilities: Pick<PlatformCapabilities, "autoUpdate">,
 ): SettingsTab[] {
   const tabs: SettingsTab[] = ["ai", "appearance", "environment"];
   if (capabilities.autoUpdate) tabs.push("updates");
-  if (capabilities.localRuntimeControl) tabs.push("recovery");
   if (developerMode) tabs.push("debug");
   return tabs;
 }
