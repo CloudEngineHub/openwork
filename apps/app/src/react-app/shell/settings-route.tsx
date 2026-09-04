@@ -181,7 +181,9 @@ import { useCommandPaletteShortcut } from "./use-shell-shortcuts";
 import { buildFeedbackUrl } from "@/app/lib/feedback";
 import { getDenInferenceUrl, type DenSettings } from "@/app/lib/den";
 import { readActiveWorkspaceId, writeActiveWorkspaceId } from "./session-memory";
+import { useUiStateStore } from "./ui-state-store";
 import {
+  automationsRoute,
   globalExtensionsRoute,
   settingsReturnRoute,
   workspaceExtensionsRoute,
@@ -442,6 +444,7 @@ export type SettingsSurfaceProps = {
 
 function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   const navigate = useNavigate();
+  const toggleSidebar = useUiStateStore((state) => state.toggleSidebar);
   const location = useLocation();
   const params = useParams<{ workspaceId?: string }>();
   const routeWorkspaceId = props.workspaceId?.trim() || params.workspaceId?.trim() || "";
@@ -2733,6 +2736,9 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       <CommandPalette
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
+        developerMode={developerMode}
+        onToggleSidebar={toggleSidebar}
+        onOpenAutomations={() => navigate(automationsRoute())}
         onCreateNewSession={() => void handleCreatePaletteSession()}
         onOpenSession={(workspaceId, sessionId) => {
           navigate(workspaceSessionRoute(workspaceId, sessionId));
@@ -2749,10 +2755,10 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
           }
           navigateSettingsPath(settingsPath);
         }}
-        onOpenExtensions={() => {
+        onOpenExtensions={(section) => {
           const target = selectedWorkspaceId
-            ? workspaceExtensionsRoute(selectedWorkspaceId)
-            : globalExtensionsRoute();
+            ? workspaceExtensionsRoute(selectedWorkspaceId, section)
+            : globalExtensionsRoute(section);
           navigate(target);
         }}
         onOpenModelPicker={() => {
