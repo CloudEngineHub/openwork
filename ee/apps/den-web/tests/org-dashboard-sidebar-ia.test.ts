@@ -39,6 +39,7 @@ describe("Den org sidebar information architecture", () => {
   test("admins see the streamlined Manage section before Observability and Team", () => {
     const pluginDirectory = indexOfNeedle('label: "Plugin Directory"');
     const connectors = indexOfNeedle('label: "Connectors"');
+    const toolTester = indexOfNeedle('label: "Tool Tester"');
     const managedDashboards = indexOfNeedle('label: "Dashboards"');
     const advanced = indexOfNeedle('label: "Advanced"');
     const workflowRuns = indexOfNeedle('label: "Workflow Runs"');
@@ -49,7 +50,8 @@ describe("Den org sidebar information architecture", () => {
     const teamSection = indexOfNeedle('{ label: "Team", items: teamItems }');
 
     expect(pluginDirectory).toBeLessThan(connectors);
-    expect(connectors).toBeLessThan(managedDashboards);
+    expect(connectors).toBeLessThan(toolTester);
+    expect(toolTester).toBeLessThan(managedDashboards);
     expect(managedDashboards).toBeLessThan(advanced);
     expect(workflowRuns).toBeLessThan(analytics);
     expect(workSection).toBeLessThan(manageSection);
@@ -57,8 +59,8 @@ describe("Den org sidebar information architecture", () => {
     expect(observabilitySection).toBeLessThan(teamSection);
     expect(shell).toContain('badge: "Providers"');
     expect(shell).toContain('badge: "MCPs"');
-    expect(shell).toContain('label: "Tool Tester"');
     expect(shell).toContain("mcpConnectionsEnabled && access.isAdmin");
+    expect(shell.slice(shell.indexOf("const settingsChildren"), shell.indexOf("const settingsGroup"))).not.toContain('label: "Tool Tester"');
     expect(shell).toMatch(
       /matchHrefs:\s*\[\s*getDesktopPoliciesRoute\(activeOrg\.slug\),\s*getBrandAppearanceRoute\(activeOrg\.slug\),\s*\]/,
     );

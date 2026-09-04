@@ -24,6 +24,7 @@ import {
   Sparkles,
   type LucideIcon,
   Users,
+  Wrench,
   X,
 } from "lucide-react";
 import { useDenFlow } from "../../_providers/den-flow-provider";
@@ -419,7 +420,7 @@ export function OrgDashboardShell({ children }: { children: React.ReactNode }) {
     && orgContext?.capabilities.openworkWeb === true;
 
   // One nav, two audiences. Members see Work only. Admins add Manage
-  // (catalog + connectors + models + Advanced), Observability, and Team.
+  // (catalog + connectors + Tool Tester + models + Advanced), Observability, and Team.
   // Advanced groups collections, desktop policies, and brand appearance as tabs.
   const workItems: DashboardNavItem[] = [
     {
@@ -480,6 +481,9 @@ export function OrgDashboardShell({ children }: { children: React.ReactNode }) {
           icon: Plug,
           badge: "MCPs",
         },
+        ...(mcpConnectionsEnabled && access.isAdmin
+          ? [{ href: getToolTesterRoute(activeOrg.slug), label: "Tool Tester", icon: Wrench }]
+          : []),
         ...(orgManagedDashboardsEnabled
           ? [{
               href: getManagedDashboardsRoute(activeOrg.slug),
@@ -523,9 +527,6 @@ export function OrgDashboardShell({ children }: { children: React.ReactNode }) {
               { href: getSsoRoute(activeOrg.slug), label: "SSO" },
               { href: getScimRoute(activeOrg.slug), label: "SCIM" },
             ]
-          : []),
-        ...(mcpConnectionsEnabled && access.isAdmin
-          ? [{ href: getToolTesterRoute(activeOrg.slug), label: "Tool Tester" }]
           : []),
       ]
     : [];
