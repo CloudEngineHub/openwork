@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { expect } from "vitest";
-import { server, test } from "@openwork/testkit";
+import { requestDenLoopback, server, test } from "@openwork/testkit";
 
 function stringField(value: unknown, key: string): string {
   if (typeof value !== "object" || value === null || !(key in value)) throw new Error(`Missing ${key}`);
@@ -18,20 +18,36 @@ test("MCP requests keep valid credentials after the public auth rate limit is ex
   });
   const origin = den.ref.webUrl;
   const forwarded = { "x-forwarded-for": "198.51.100.10, 192.0.2.10" };
-  const request = (path: string, init: RequestInit = {}) => fetch(`${den.ref.apiUrl}${path}`, {
-    ...init,
-    redirect: "manual",
-    signal: AbortSignal.timeout(15_000),
-    headers: { origin, ...forwarded, ...init.headers },
-  });
+  const request = (path: string, init: RequestInit = {}) => {
+    const options = { ...init, headers: { origin, ...forwarded, ...init.headers } };
+    if (den.placement?.kind === "daytona") return requestDenLoopback(den.placement.sandboxId, path, options);
+    return fetch(`${den.ref.apiUrl}${path}`, { ...options, redirect: "manual", signal: AbortSignal.timeout(15_000) });
+  };
   const login = await request("/api/auth/sign-in/email", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: den.admin.email, password: den.admin.password }),
   });
   expect(login.status).toBe(200);
-  const cookie = login.headers.getSetCookie().map((entry) => entry.split(";")[0]).join("; ");
+  let cookie = login.headers.getSetCookie().map((entry) => entry.split(";")[0]).join("; ");
   expect(cookie.length).toBeGreaterThan(0);
+  const organizations = await request("/api/auth/organization/list", { headers: { cookie } });
+  expect(organizations.status).toBe(200);
+  const availableOrganizations: unknown = await organizations.json();
+  if (!Array.isArray(availableOrganizations)) throw new Error("Missing organization list");
+  const organization = availableOrganizations.find((entry) => stringField(entry, "name") === "MCP Auth Regression");
+  const selected = await request("/api/auth/organization/set-active", {
+    method: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ organizationId: stringField(organization, "id") }),
+  });
+  expect(selected.status).toBe(200);
+  const cookies = new Map<string, string>();
+  for (const entry of [...login.headers.getSetCookie(), ...selected.headers.getSetCookie()]) {
+    const pair = entry.split(";")[0];
+    cookies.set(pair.slice(0, pair.indexOf("=")), pair);
+  }
+  cookie = [...cookies.values()].join("; ");
   const redirectUri = "http://127.0.0.1:19876/callback";
   const scope = "mcp:read mcp:write offline_access";
   const registration = await request("/register", {
@@ -53,7 +69,7 @@ test("MCP requests keep valid credentials after the public auth rate limit is ex
     headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ accept: true, scope, oauth_query: new URL(consentLocation, origin).search.slice(1) }),
   });
-  expect(consent.status).toBe(200);
+  expect(consent.status, await consent.clone().text()).toBe(200);
   const callback = new URL(stringField(await consent.json(), "url"));
   const code = callback.searchParams.get("code");
   if (!code) throw new Error("Missing authorization code");
