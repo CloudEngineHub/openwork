@@ -1060,7 +1060,10 @@ export async function sessionErrorCard(seed: Seed) {
   const workspace = await seed.workspace(app, seed.tmpPath("session-error-details"));
   const session = await seedSessionRetry(seed, app, { title: "Session error proof" });
   await arrangeControl(seed, app, "eval.session_error.seed");
-  return { app, workspace, session };
+  return {
+    app, workspace, session,
+    seedStorageError: (kind: "disk-full" | "database-error", surface: "transcript" | "banner" = "transcript") => arrangeControl(seed, app, "eval.session_error.seed", { kind, surface }),
+  };
 }
 
 export async function snapshotFailure(seed: Seed) {
