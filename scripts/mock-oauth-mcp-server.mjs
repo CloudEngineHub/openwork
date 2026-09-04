@@ -51,6 +51,7 @@ const refreshTokens = new Set();
 const requests = [];
 const drafts = [];
 let agentWorkloads = [];
+let configuredTools = [];
 
 const gmailThreadId = "thread-q3-launch";
 
@@ -193,7 +194,10 @@ function validateAgentWorkloads(value) {
       if (!step.arguments || typeof step.arguments !== "object" || Array.isArray(step.arguments)) {
         throw new Error(`agent workload ${promptMarker} tool ${step.tool} needs object arguments`);
       }
-      return { tool: step.tool.trim(), arguments: structuredClone(step.arguments) };
+      if (step.argumentsFrom !== undefined && step.argumentsFrom !== "computer-mention") {
+        throw new Error(`agent workload ${promptMarker} has an unknown argument source`);
+      }
+      return { tool: step.tool.trim(), arguments: structuredClone(step.arguments), argumentsFrom: step.argumentsFrom };
     });
     // Declared fault: the first N main completions stream their opening chunk
     // and then go quiet without ending, the way a half-open socket behaves
@@ -267,6 +271,23 @@ function agentChunk(model, delta, finishReason = null) {
   };
 }
 
+// A deterministic model that reads the submitted message, rather than replaying
+// an expected destination or task from the fixture.
+function computerMentionArguments(messages) {
+  const message = [...messages].reverse().find((candidate) => candidate?.role === "user"
+    && agentContentText(candidate).includes("[The user selected @"));
+  const text = agentContentText(message);
+  const instruction = text.match(/\[The user selected @(?:cloud|desktop):[\s\S]*?\]/)?.[0];
+  const target = instruction?.match(/execute it with target "(cloud|desktop)"/)?.[1];
+  if (!instruction || !target) throw new Error("computer task has no routing instruction");
+  const prompt = text.replace(instruction, "")
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
+    .replace(/(^|\s)@(cloud|desktop)(?=\s|$)/g, "$1")
+    .replace(/\s+/g, " ").trim();
+  if (!prompt) throw new Error("computer task has no prompt");
+  return { name: "remote-session:create", body: { target, prompt } };
+}
+
 async function handleAgentCompletion(req, res, entry) {
   const body = await readJson(req);
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -320,13 +341,14 @@ async function handleAgentCompletion(req, res, entry) {
     json(res, 400, { error: { message: `tool ${step.tool} was not offered to the mock agent` } });
     return;
   }
+  const toolArguments = step.argumentsFrom === "computer-mention" ? computerMentionArguments(messages) : step.arguments;
   const callId = `call_${workload.promptMarker.replace(/[^a-zA-Z0-9_-]/g, "_")}_${completedTools + 1}`;
   entry.agentCompletion = {
     ...baseRequest,
     kind: "tool",
     promptMarker: workload.promptMarker,
     toolName,
-    arguments: step.arguments,
+    arguments: toolArguments,
   };
   agentStream(res, model, [
     agentChunk(model, { role: "assistant" }),
@@ -335,7 +357,7 @@ async function handleAgentCompletion(req, res, entry) {
         index: 0,
         id: callId,
         type: "function",
-        function: { name: toolName, arguments: JSON.stringify(step.arguments) },
+        function: { name: toolName, arguments: JSON.stringify(toolArguments) },
       }],
     }),
     agentChunk(model, {}, "tool_calls"),
@@ -629,6 +651,13 @@ function tokenFingerprint(req) {
 }
 
 function mcpResult(message) {
+  if (configuredTools.length && message.method === "tools/list") {
+    return { tools: configuredTools.map(({ result, ...tool }) => tool) };
+  }
+  if (message.method === "tools/call") {
+    const tool = configuredTools.find((candidate) => candidate.name === message.params?.name);
+    if (tool) return tool.result;
+  }
   switch (message.method) {
     case "initialize":
       return {
@@ -860,6 +889,17 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/requests") {
       json(res, 200, { requests });
+      return;
+    }
+
+    if (url.pathname === "/admin/tools" && req.method === "POST") {
+      const body = await readJson(req);
+      if (!Array.isArray(body?.tools) || body.tools.some((tool) => !tool || typeof tool.name !== "string" || !tool.inputSchema || !tool.result)) {
+        json(res, 400, { error: "tools must have a name, inputSchema, and result" });
+        return;
+      }
+      configuredTools = body.tools;
+      json(res, 200, { configured: configuredTools.length });
       return;
     }
 
