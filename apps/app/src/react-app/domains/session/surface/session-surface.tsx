@@ -10,7 +10,9 @@ import { captureAnalyticsEvent } from "@/app/lib/analytics";
 import { interruptSessionTurn, sessionNeedsStop, submitAfterInterruption, subscribeSessionInterruption } from "@/app/lib/opencode-interruption";
 import { createClient, createPromptMessageID, hasAcceptedPromptMessage, isPromptAdmissionUnknown, unwrap } from "@/app/lib/opencode";
 import { createClientV2, isOpencodeV2BaseUrl } from "@/app/lib/opencode-v2-adapter";
-import { composeNativeSessionSnapshot } from "@/app/lib/opencode-session-native";
+import * as opencodeSessionNative from "@/app/lib/opencode-session-native";
+import type { NativeSessionSnapshotTarget } from "@/app/lib/opencode-session-native";
+import { isDesktopRuntime } from "@/app/lib/runtime-env";
 import { setThemeMode } from "@/app/theme";
 import { t } from "@/i18n";
 import type { ComposerSettingsSection } from "@/react-app/domains/settings/library";
@@ -22,6 +24,7 @@ import type {
   OpenworkServerClient,
   OpenworkSessionSnapshot,
 } from "@/app/lib/openwork-server";
+import { isLoopbackOpenworkServerUrl } from "@/app/lib/openwork-server";
 import type {
   ComposerAttachment,
   ComposerDraft,
@@ -116,6 +119,7 @@ import {
   getComposerRevertMessageId,
   getComposerSessionDraftScope,
   persistableComposerDraftText,
+  type ComposerSessionState,
   useComposerStateStore,
 } from "./composer-state-store";
 import { MessageList } from "@/components/chat/message-list";
@@ -146,7 +150,13 @@ import {
   readCloudInventoryScope,
 } from "@/react-app/domains/connections/cloud-inventory-cache";
 import { connectPluginsForComposer, EMPTY_CONNECT_CAPABILITY_INVENTORY } from "@/react-app/domains/session/surface/connect-capability-inventory";
-import { consumeComposerAutoSend, hasComposerAutoSend } from "./composer-auto-send";
+import {
+  composerAutoSendScopeKey,
+  consumeComposerAutoSend,
+  consumeComposerAutoSendPayload,
+  getComposerAutoSendPayload,
+  hasComposerAutoSend,
+} from "./composer-auto-send";
 import { useOrgMcpConnections } from "@/react-app/domains/connections/use-org-mcp-connections";
 import { buildConnectorToolIdentities } from "@/react-app/domains/connections/connector-tool-identity";
 
@@ -154,6 +164,16 @@ const EMPTY_TRANSCRIPT: UIMessage[] = [];
 const IDLE_STATUS: SessionStatus = { type: "idle" };
 const DEFAULT_COMPOSER_CONTROL_TEXT = "Help me outline the next OpenWork task.";
 const SESSION_SURFACE_SELECTOR = "[data-session-surface-id]";
+
+function sanitizedInspectorDiagnosticText(value: string) {
+  return value
+    .replace(/https?:\/\/[^\s"'<>]+/gi, "[url]")
+    .replace(/\b(Bearer|Basic)\s+[^\s"'<>]+/gi, "$1 [redacted]")
+    .replace(/\b(authorization|ownerToken|clientToken|openworkToken|accessToken|apiKey|token)\b\s*[=:]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .replace(/[\r\n\t]+/g, " ")
+    .slice(0, 240);
+}
+
 const MARKDOWN_PRIMITIVE_EVAL_TEXT = `# Markdown proof heading
 
 This shared renderer keeps **bold proof text**, inline \`renderMarkdownHtml\`, and [OpenWork link](https://openworklabs.com) readable in one message.
@@ -947,6 +967,16 @@ function withoutRevertTarget(draft: ComposerDraft | null): ComposerDraft | null 
   return { ...draft, revertMessageId: undefined };
 }
 
+function composerSessionHasContent(state: ComposerSessionState | undefined) {
+  return Boolean(state && (
+    state.draft
+    || state.attachments.length
+    || Object.keys(state.mentions).length
+    || state.pasteParts.length
+    || state.revertMessageId
+  ));
+}
+
 function hiddenMessageCount(snapshot: OpenworkSessionSnapshot, revertMessageId: string): number {
   const index = snapshot.messages.findIndex((message) => message.info.id === revertMessageId);
   return index < 0 ? snapshot.messages.length : snapshot.messages.length - index;
@@ -1101,9 +1131,24 @@ export function SessionSurface(props: SessionSurfaceProps) {
     : Boolean(props.modelUnavailable);
   // This surface is retained across navigation. Async completions must keep
   // their original owner, including when different servers reuse session IDs.
-  const sessionOwner = JSON.stringify([props.draftScope, props.opencodeBaseUrl, props.workspaceId, props.sessionId]);
+  const sessionOwner = composerAutoSendScopeKey({
+    draftScope: props.draftScope,
+    opencodeBaseUrl: props.opencodeBaseUrl,
+    workspaceId: props.workspaceId,
+    sessionId: props.sessionId,
+  });
   const activeSessionOwnerRef = useRef(sessionOwner);
   activeSessionOwnerRef.current = sessionOwner;
+  const snapshotTargetRef = useRef<NativeSessionSnapshotTarget>({
+    owner: sessionOwner,
+    endpoint: { opencodeBaseUrl: props.opencodeBaseUrl, token: props.openworkToken },
+    sessionId: props.sessionId,
+  });
+  snapshotTargetRef.current = {
+    owner: sessionOwner,
+    endpoint: { opencodeBaseUrl: props.opencodeBaseUrl, token: props.openworkToken },
+    sessionId: props.sessionId,
+  };
   const [ownedError, setOwnedError] = useState<{ owner: string; error: SessionError } | null>(null);
   const error = ownedError?.owner === sessionOwner ? ownedError.error : null;
   const setError = useCallback((nextError: SessionError | null) => {
@@ -1177,6 +1222,8 @@ export function SessionSurface(props: SessionSurfaceProps) {
     () => reactStatusKey(props.workspaceId, props.sessionId),
     [props.workspaceId, props.sessionId],
   );
+  const useDesktopLoopbackSnapshotRetry = isDesktopRuntime()
+    && isLoopbackOpenworkServerUrl(props.opencodeBaseUrl);
   const snapshotQuery = useQuery<OpenworkSessionSnapshot>({
     queryKey: snapshotQueryKey,
     queryFn: async ({ signal }) => {
@@ -1184,19 +1231,36 @@ export function SessionSurface(props: SessionSurfaceProps) {
         throw new Error("eval: forced session snapshot failure");
       }
       const startedAt = Date.now();
-      const item = await composeNativeSessionSnapshot(
-        { opencodeBaseUrl: props.opencodeBaseUrl, token: props.openworkToken },
-        props.sessionId,
-        { limit: 140, signal },
-      );
+      const item = useDesktopLoopbackSnapshotRetry
+        ? await opencodeSessionNative.composeNativeSessionSnapshotWithRetry(
+          sessionOwner,
+          () => snapshotTargetRef.current,
+          { limit: 140, signal },
+        )
+        : await opencodeSessionNative.composeNativeSessionSnapshot(
+          { opencodeBaseUrl: props.opencodeBaseUrl, token: props.openworkToken },
+          props.sessionId,
+          { limit: 140, signal },
+        );
       markSessionSnapshotFetchStart(item, startedAt);
       return item;
     },
     staleTime: 500,
-    retry: (failureCount) => !evalSnapshotFailureRef.current && failureCount < 3,
+    networkMode: useDesktopLoopbackSnapshotRetry ? "always" : undefined,
+    retry: useDesktopLoopbackSnapshotRetry
+      ? false
+      : (failureCount) => !evalSnapshotFailureRef.current && failureCount < 3,
   });
 
   const currentSnapshot = snapshotQuery.data?.session.id === props.sessionId ? snapshotQuery.data : null;
+  const inspectorOpencodeBaseUrl = useMemo(() => {
+    try {
+      const url = new URL(props.opencodeBaseUrl);
+      return { origin: url.origin, pathname: url.pathname };
+    } catch {
+      return { origin: null, pathname: null };
+    }
+  }, [props.opencodeBaseUrl]);
   const transcriptState = useSharedQueryState<UIMessage[]>(transcriptQueryKey, EMPTY_TRANSCRIPT);
   const statusQuery = useQuery<SessionStatus, Error, SessionStatus, readonly unknown[]>({
     queryKey: statusQueryKey,
@@ -1263,6 +1327,20 @@ export function SessionSurface(props: SessionSurfaceProps) {
         code: props.cloudMcpSubmissionState.issue?.code ?? null,
         stage: props.cloudMcpSubmissionState.issue?.stage ?? null,
       },
+      snapshotQuery: {
+        status: snapshotQuery.status,
+        fetchStatus: snapshotQuery.fetchStatus,
+        isPaused: snapshotQuery.isPaused,
+        failureCount: snapshotQuery.failureCount,
+        errorName: snapshotQuery.error ? sanitizedInspectorDiagnosticText(snapshotQuery.error.name) : null,
+        errorMessage: snapshotQuery.error ? sanitizedInspectorDiagnosticText(snapshotQuery.error.message) : null,
+        dataSessionId: snapshotQuery.data?.session.id ?? null,
+        dataMessageCount: snapshotQuery.data?.messages.length ?? null,
+        currentSnapshotId: currentSnapshot?.session.id ?? null,
+        intendedSessionId: props.sessionId,
+        opencodeBaseUrl: inspectorOpencodeBaseUrl,
+        tokenPresent: props.openworkToken.length > 0,
+      },
       error,
     }));
     return dispose;
@@ -1272,10 +1350,19 @@ export function SessionSurface(props: SessionSurfaceProps) {
     error,
     mentions,
     pasteParts,
+    currentSnapshot,
+    inspectorOpencodeBaseUrl,
+    props.openworkToken,
     props.sessionId,
     props.workspaceId,
     props.cloudMcpSubmissionState,
     sending,
+    snapshotQuery.data,
+    snapshotQuery.error,
+    snapshotQuery.failureCount,
+    snapshotQuery.fetchStatus,
+    snapshotQuery.isPaused,
+    snapshotQuery.status,
   ]);
 
   useEffect(() => {
@@ -1350,7 +1437,10 @@ export function SessionSurface(props: SessionSurfaceProps) {
   );
   const pendingMessages = useComposerStateStore((state) => state.pendingMessages[sessionOwner]);
   const failedDraft = useComposerStateStore((state) => state.failedDrafts[sessionOwner]?.[0]);
-  const autoSending = hasComposerAutoSend(props.sessionId) && !sessionModelUnavailable && attachments.length === 0;
+  const autoSendPayload = getComposerAutoSendPayload(props.sessionId, sessionOwner);
+  const autoSending = (Boolean(autoSendPayload)
+    || (hasComposerAutoSend(props.sessionId) && attachments.length === 0))
+    && !sessionModelUnavailable;
   const unmatchedPendingMessages = useMemo(() => {
     const matchedIds = new Set<string>();
     const remaining = (pendingMessages ?? []).filter(({ draft: pending, previousMessageIds }) => {
@@ -1381,13 +1471,18 @@ export function SessionSurface(props: SessionSurfaceProps) {
       role: "user",
       parts: [{ type: "text", text: item.resolvedText ?? item.text }],
     }));
-    if (autoSending && draft.trim()) pending.push({
-      id: `${props.sessionId}:first-send`,
-      role: "user",
-      parts: [{ type: "text", text: resolvePastedTextPlaceholders(draft, pasteParts).replace(/\[attachment [^\]]+\]/g, "") }],
-    });
+    if (autoSending) {
+      const pendingComposer = autoSendPayload?.composer;
+      const pendingText = pendingComposer?.draft ?? draft;
+      const pendingPasteParts = pendingComposer?.pasteParts ?? pasteParts;
+      if (pendingText.trim() || (pendingComposer?.attachments.length ?? attachments.length)) pending.push({
+        id: `${props.sessionId}:first-send`,
+        role: "user",
+        parts: [{ type: "text", text: resolvePastedTextPlaceholders(pendingText, pendingPasteParts).replace(/\[attachment [^\]]+\]/g, "") }],
+      });
+    }
     return [...baseRenderedMessages, ...pending, ...evalMarkdownMessages];
-  }, [autoSending, baseRenderedMessages, draft, evalMarkdownMessages, pasteParts, props.sessionId, unmatchedPendingMessages]);
+  }, [attachments.length, autoSendPayload, autoSending, baseRenderedMessages, draft, evalMarkdownMessages, pasteParts, props.sessionId, unmatchedPendingMessages]);
   const renderedMessagesRef = useRef(renderedMessages);
   useEffect(() => {
     renderedMessagesRef.current = renderedMessages;
@@ -1757,7 +1852,8 @@ export function SessionSurface(props: SessionSurfaceProps) {
     renderedSessionId: renderedMessages.length > 0 || snapshot ? props.sessionId : null,
     hasSnapshot: Boolean(snapshot) || renderedMessages.length > 0,
     isFetching: snapshotQuery.isFetching,
-    isError: snapshotQuery.isError || Boolean(error),
+    // A failed send stays visible for composer recovery; only snapshot failure invalidates the session transition.
+    isError: snapshotQuery.isError,
   });
   const failSessionSnapshotControlAction = useMemo<OpenworkControlAction | null>(() => {
     if (!import.meta.env.DEV) return null;
@@ -1776,7 +1872,13 @@ export function SessionSurface(props: SessionSurfaceProps) {
   }, [props.sessionId, snapshotQuery.refetch]);
   useControlAction(props.isControlTarget ? failSessionSnapshotControlAction : null);
 
-  const buildDraft = useCallback((text: string, nextAttachments: ComposerAttachment[]): ComposerDraft => {
+  const buildDraft = useCallback((
+    text: string,
+    nextAttachments: ComposerAttachment[],
+    sourceComposer?: ComposerSessionState,
+  ): ComposerDraft => {
+    const sourceMentions = sourceComposer?.mentions ?? mentions;
+    const sourcePasteParts = sourceComposer?.pasteParts ?? pasteParts;
     const parts: ComposerPart[] = text.split(/(\[attachment [^\]]+\]|\[pasted text [^\]]+\]|\[connect-skill [^\]]+\]|\[skill [^\]]+\]|@[^\s@]+)/).flatMap((segment, index, segments) => {
       if (!segment) return [] as ComposerDraft["parts"];
       const attachmentMatch = segment.match(/^\[attachment (.+)\]$/);
@@ -1786,7 +1888,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
       }
       const pasteMatch = segment.match(/^\[pasted text (.+)\]$/);
       if (pasteMatch) {
-        const target = pasteParts.find((item) => item.label === pasteMatch[1]);
+        const target = sourcePasteParts.find((item) => item.label === pasteMatch[1]);
         if (target) {
           return [{ type: "paste", id: target.id, label: target.label, text: target.text, lines: target.lines } satisfies ComposerDraft["parts"][number]];
         }
@@ -1801,7 +1903,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
       }
       if (segment.startsWith("@")) {
         const value = decodeComposerMentionValue(segment.slice(1));
-        const kind = mentions[value];
+        const kind = sourceMentions[value];
         if (isComputerTarget(value) && (!kind || kind === "computer") && (index <= 1 && !segments[0] || /\s$/.test(segments[index - 1] ?? ""))) {
           return [{ type: "computer", target: value } satisfies ComposerDraft["parts"][number]];
         }
@@ -1813,14 +1915,14 @@ export function SessionSurface(props: SessionSurfaceProps) {
     });
     // Expand paste placeholders in resolvedText so the model receives
     // the actual pasted content instead of "[pasted text <label>]".
-    let resolved = resolvePastedTextPlaceholders(text, pasteParts);
+    let resolved = resolvePastedTextPlaceholders(text, sourcePasteParts);
     resolved = resolved.replace(/\[attachment [^\]]+\]/g, "");
     resolved = resolved.replace(/\[connect-skill [^\]]+\]/g, (match) => {
       const token = parseConnectSkillToken(match);
       return token ? `/${token.slug}` : match;
     });
     resolved = resolved.replace(/\[skill ([^\]]+)\]/g, (_match, name: string) => `the \"${name}\" skill`);
-    for (const value of Object.keys(mentions)) {
+    for (const value of Object.keys(sourceMentions)) {
       resolved = resolved.replaceAll(`@${encodeComposerMentionValue(value)}`, `@${value}`);
     }
     // A selected Connect skill is a mention, even though its label starts with /.
@@ -1832,7 +1934,9 @@ export function SessionSurface(props: SessionSurfaceProps) {
       text,
       resolvedText: resolved,
       command: slashCommand ?? undefined,
-      revertMessageId: getComposerRevertMessageId(useComposerStateStore.getState(), props.sessionId) ?? undefined,
+      revertMessageId: sourceComposer
+        ? sourceComposer.revertMessageId ?? undefined
+        : getComposerRevertMessageId(useComposerStateStore.getState(), props.sessionId) ?? undefined,
     };
   }, [mentions, pasteParts, props.sessionId]);
 
@@ -1913,27 +2017,28 @@ export function SessionSurface(props: SessionSurfaceProps) {
 
   // Initial send (agent idle) and explicit "Steer" follow-up (agent busy)
   // share the same immediate path.
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(async (sourceComposer?: ComposerSessionState) => {
     if ([...pendingSendsRef.current.values()].includes(sessionOwner)) return;
-    const originalDraft = draft;
+    const originalDraft = sourceComposer?.draft ?? draft;
+    const sourceAttachments = sourceComposer?.attachments ?? attachments;
     const text = originalDraft.trim();
-    if (!text && attachments.length === 0) return;
-    const nextDraft = { ...buildDraft(text, attachments), messageId: createPromptMessageID() };
+    if (!text && sourceAttachments.length === 0) return;
+    const nextDraft = {
+      ...buildDraft(text, sourceAttachments, sourceComposer),
+      messageId: createPromptMessageID(),
+    };
     // Immediate sends and queued sends share the same slot across all panes.
     dispatchQueuedDrain(props.sessionId, { type: "user_retry" });
     if (!claimQueuedSend(props.sessionId, nextDraft.messageId, true)) return;
-    const sentAttachments = attachments;
-    const savedComposer = useComposerStateStore.getState().sessions[props.sessionId];
+    const sentAttachments = sourceAttachments;
+    const composerCheckpoint = useComposerStateStore.getState().sessions[props.sessionId];
+    const savedComposer = sourceComposer ?? composerCheckpoint;
     let clearedComposer: typeof savedComposer;
     let composerCleared = false;
-    const markPrepared = () => {
-      // Do not erase edits made while attachments were being prepared.
-      if (useComposerStateStore.getState().sessions[props.sessionId] === savedComposer
-        && getComposerSessionDraftScope(props.sessionId) === persistedDraftKey) {
-        clearComposer();
-        clearedComposer = useComposerStateStore.getState().sessions[props.sessionId];
-        composerCleared = true;
-      }
+    let pendingRegistered = false;
+    const registerPending = () => {
+      if (pendingRegistered) return;
+      pendingRegistered = true;
       useComposerStateStore.setState((state) => ({
         pendingMessages: {
           ...state.pendingMessages,
@@ -1943,6 +2048,17 @@ export function SessionSurface(props: SessionSurfaceProps) {
           }],
         },
       }));
+    };
+    const markPrepared = () => {
+      // Do not erase edits made while attachments were being prepared.
+      if (!sourceComposer
+        && useComposerStateStore.getState().sessions[props.sessionId] === composerCheckpoint
+        && getComposerSessionDraftScope(props.sessionId) === persistedDraftKey) {
+        clearComposer();
+        clearedComposer = useComposerStateStore.getState().sessions[props.sessionId];
+        composerCleared = true;
+      }
+      registerPending();
       setAttachmentsUploading(false);
     };
     const removePending = () => useComposerStateStore.setState((state) => ({
@@ -1953,8 +2069,22 @@ export function SessionSurface(props: SessionSurfaceProps) {
     }));
     const restore = () => {
       removePending();
-      if (!composerCleared) return;
       const state = useComposerStateStore.getState();
+      if (!composerCleared) {
+        if (!sourceComposer || !savedComposer) return;
+        if (state.sessions[props.sessionId] === composerCheckpoint
+          && !composerSessionHasContent(composerCheckpoint)
+          && getComposerSessionDraftScope(props.sessionId) === persistedDraftKey) {
+          useComposerStateStore.setState({ sessions: { ...state.sessions, [props.sessionId]: savedComposer } });
+          props.onDraftChange(nextDraft);
+        } else {
+          useComposerStateStore.setState({ failedDrafts: {
+            ...state.failedDrafts,
+            [sessionOwner]: [...(state.failedDrafts[sessionOwner] ?? []), savedComposer],
+          } });
+        }
+        return;
+      }
       // Identity, not text equality: typing and then deleting is still a newer edit.
       if (savedComposer && state.sessions[props.sessionId] === clearedComposer
         && getComposerSessionDraftScope(props.sessionId) === persistedDraftKey) {
@@ -1967,6 +2097,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
         } });
       }
     };
+    if (sourceComposer && sentAttachments.length) registerPending();
     if (sentAttachments.length) setAttachmentsUploading(true);
     else markPrepared();
     try {
@@ -1977,7 +2108,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
       }
       if (result.outcome !== "unknown" && (nextDraft.command || nextDraft.mode === "shell")) removePending();
       const retained = useComposerStateStore.getState().sessions[props.sessionId]?.attachments ?? [];
-      sentAttachments.filter((attachment) => !retained.includes(attachment)).forEach(revokeAttachmentPreview);
+      sentAttachments.filter((attachment) => !retained.some((item) => item.id === attachment.id)).forEach(revokeAttachmentPreview);
     } catch {
       restore();
     } finally {
@@ -1985,19 +2116,26 @@ export function SessionSurface(props: SessionSurfaceProps) {
     }
   }, [attachments, baseRenderedMessages, buildDraft, clearComposer, draft, persistedDraftKey, props.onDraftChange, props.sessionId, sendDraft, sessionOwner]);
 
-  // One-step run from the empty-state hero: the route seeds this session's
-  // draft and marks it for auto-send. Fire the same send path as the send
-  // button once the composer is usable; if these conditions never hold
-  // (e.g. no usable model), the mark is never consumed and the seeded
-  // draft stays for manual sending.
+  // One-step run from the empty-state hero: the route keeps the continuation
+  // in this session's composer and marks the submitted snapshot for auto-send.
+  // Fire the same send path as the send button once the composer is usable;
+  // until then, leave both the scoped mark and continuation untouched.
   useEffect(() => {
     if (model.transitionState !== "idle") return;
     if (chatStreaming) return;
     if (sessionModelUnavailable) return;
+    const sourceComposer = autoSendPayload?.composer;
+    if (sourceComposer) {
+      if (!sourceComposer.draft.trim() && !sourceComposer.attachments.length) return;
+      const payload = consumeComposerAutoSendPayload(props.sessionId, sessionOwner);
+      if (!payload) return;
+      void handleSend(payload.composer);
+      return;
+    }
     if (!draft.trim() && !attachments.length) return;
     if (!consumeComposerAutoSend(props.sessionId)) return;
     void handleSend();
-  }, [attachments.length, chatStreaming, draft, handleSend, model.transitionState, sessionModelUnavailable, props.sessionId]);
+  }, [attachments.length, autoSendPayload, chatStreaming, draft, handleSend, model.transitionState, sessionModelUnavailable, props.sessionId, sessionOwner]);
 
   const handleSteer = useCallback(async () => {
     setSteering(true);
@@ -3084,16 +3222,16 @@ export function SessionSurface(props: SessionSurfaceProps) {
         )))}
         <ReactSessionComposer
           runModeControl={<WorkspaceRunModeMenu client={props.client} workspaceId={props.workspaceId} busy={chatStreaming || preparingCloudTools || Boolean(props.activePermission || props.activeQuestion)} />}
-          draft={autoSending ? "" : draft}
+          draft={autoSendPayload ? draft : autoSending ? "" : draft}
           mentions={mentions}
           onDraftChange={handleComposerDraftChange}
-        onSend={handleSend}
+        onSend={() => handleSend()}
         onSteer={handleSteer}
         onQueue={handleQueue}
         onStop={async () => { await handleAbort(); }}
         busy={chatStreaming}
         steering={steering}
-        submissionPreparing={preparingCloudTools || sending}
+        submissionPreparing={preparingCloudTools || sending || autoSending}
         queuedCount={queuedItems.length}
         disabled={model.transitionState !== "idle" || sessionModelUnavailable || queuedDrainState.phase.kind === "admission_unknown"}
         modelUnavailable={sessionModelUnavailable}
