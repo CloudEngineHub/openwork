@@ -12,6 +12,8 @@ const viewButton: Target = { role: "button", label: "View" };
 test("session archive is honest about availability and can be undone when supported", async ({ world, user, agent, probe, step }) => {
   const candidateId = world.candidate.sessionId;
   const neighborId = world.neighbor.sessionId;
+  const inventoryCount = { testId: `workspace-conversation-count-${world.workspace.workspaceId}` };
+  let initialInventoryCount = 0;
   const candidateRow = { testId: `sidebar-session-${candidateId}` };
   const archiveButton: Target = { role: "button", label: "Archive session", testId: `session-archive-${candidateId}` };
   const archiveCandidate = async () => {
@@ -46,10 +48,15 @@ test("session archive is honest about availability and can be undone when suppor
     });
     expect(stamps[candidateId]).toBe(0);
     expect(stamps[neighborId]).toBe(0);
+    // A cold desktop may also retain its bootstrap root conversation. Count the
+    // independent server inventory, not just this fixture's two named roots.
+    initialInventoryCount = Object.values(stamps).filter(stamp => stamp === 0).length;
+    expect(initialInventoryCount).toBeGreaterThanOrEqual(2);
     const sidebar = await world.sidebar();
     expect(sidebar.active).toContain(candidateId);
     expect(sidebar.active).toContain(neighborId);
     expect(sidebar.archivedSection).toBe(false);
+    await user.see(inventoryCount, { text: String(initialInventoryCount) });
     await user.notSee(archivedToast);
   });
 
@@ -104,6 +111,7 @@ test("session archive is honest about availability and can be undone when suppor
     expect(sidebar.active).not.toContain(candidateId);
     expect(sidebar.active).toContain(neighborId);
     expect(sidebar.archivedSection).toBe(true);
+    await user.see(inventoryCount, { text: String(initialInventoryCount - 1) });
   });
 
   await step("Undo restores the candidate without announcing itself", async () => {
@@ -124,6 +132,7 @@ test("session archive is honest about availability and can be undone when suppor
     expect(sidebar.active).toContain(candidateId);
     expect(sidebar.active).toContain(neighborId);
     expect(sidebar.archivedSection).toBe(false);
+    await user.see(inventoryCount, { text: String(initialInventoryCount) });
     await user.notSee({ text: "Session unarchived" });
     await user.notSee(undoButton);
   });
