@@ -1337,6 +1337,10 @@ export type OAuthProviderStatusResponse = {
   scopes: Array<string> | null;
 };
 
+export type OkResponse = {
+  ok: true;
+};
+
 export type GoogleWorkspaceDriveFileSummary = {
   id: string;
   name: string;
@@ -8499,10 +8503,13 @@ export type GetV1BrandAssetsByOrganizationIdByKindByVersionError =
 
 export type GetV1BrandAssetsByOrganizationIdByKindByVersionResponses = {
   /**
-   * Immutable brand image bytes.
+   * Immutable brand image bytes. The media type follows the `{version}` extension (`.png` -> `image/png`, `.jpg` -> `image/jpeg`); served with `Cache-Control: public, max-age=31536000, immutable` and an `ETag` equal to the content hash.
    */
-  200: unknown;
+  200: Blob | File;
 };
+
+export type GetV1BrandAssetsByOrganizationIdByKindByVersionResponse =
+  GetV1BrandAssetsByOrganizationIdByKindByVersionResponses[keyof GetV1BrandAssetsByOrganizationIdByKindByVersionResponses];
 
 export type PostV1OrgBrandAssetsData = {
   body?: never;
@@ -12023,10 +12030,12 @@ export type GetV1SsoMetadataError = GetV1SsoMetadataErrors[keyof GetV1SsoMetadat
 
 export type GetV1SsoMetadataResponses = {
   /**
-   * SAML metadata document
+   * SAML Service Provider metadata (an `EntityDescriptor` XML document) served as `application/xml`.
    */
-  200: unknown;
+  200: Blob | File;
 };
+
+export type GetV1SsoMetadataResponse = GetV1SsoMetadataResponses[keyof GetV1SsoMetadataResponses];
 
 export type PostV1SsoRequestDomainVerificationData = {
   body?: never;
@@ -13744,10 +13753,13 @@ export type PostV1OauthProvidersByProviderIdDisconnectError =
 
 export type PostV1OauthProvidersByProviderIdDisconnectResponses = {
   /**
-   * Disconnected.
+   * The stored credential was removed.
    */
-  200: unknown;
+  200: OkResponse;
 };
+
+export type PostV1OauthProvidersByProviderIdDisconnectResponse =
+  PostV1OauthProvidersByProviderIdDisconnectResponses[keyof PostV1OauthProvidersByProviderIdDisconnectResponses];
 
 export type SendGmailDraftData = {
   body: {
@@ -17388,10 +17400,13 @@ export type DeleteV1McpConnectionsByConnectionIdError =
 
 export type DeleteV1McpConnectionsByConnectionIdResponses = {
   /**
-   * Removed.
+   * The connection was removed.
    */
-  200: unknown;
+  200: OkResponse;
 };
+
+export type DeleteV1McpConnectionsByConnectionIdResponse =
+  DeleteV1McpConnectionsByConnectionIdResponses[keyof DeleteV1McpConnectionsByConnectionIdResponses];
 
 export type GetV1McpConnectionsByConnectionIdData = {
   body?: never;
@@ -17579,10 +17594,13 @@ export type PostV1McpConnectionsByConnectionIdDisconnectError =
 
 export type PostV1McpConnectionsByConnectionIdDisconnectResponses = {
   /**
-   * Disconnected.
+   * Every stored account for the connection was signed out.
    */
-  200: unknown;
+  200: OkResponse;
 };
+
+export type PostV1McpConnectionsByConnectionIdDisconnectResponse =
+  PostV1McpConnectionsByConnectionIdDisconnectResponses[keyof PostV1McpConnectionsByConnectionIdDisconnectResponses];
 
 export type PostV1McpConnectionsByConnectionIdDisconnectMyAccountData = {
   body?: never;
@@ -17616,10 +17634,13 @@ export type PostV1McpConnectionsByConnectionIdDisconnectMyAccountError =
 
 export type PostV1McpConnectionsByConnectionIdDisconnectMyAccountResponses = {
   /**
-   * Disconnected.
+   * The caller's connected account was removed.
    */
-  200: unknown;
+  200: OkResponse;
 };
+
+export type PostV1McpConnectionsByConnectionIdDisconnectMyAccountResponse =
+  PostV1McpConnectionsByConnectionIdDisconnectMyAccountResponses[keyof PostV1McpConnectionsByConnectionIdDisconnectMyAccountResponses];
 
 export type GetV1McpConnectionsByConnectionIdConnectStartData = {
   body?: never;
