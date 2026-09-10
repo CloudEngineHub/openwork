@@ -29,6 +29,9 @@ const definitions = {
   'live-tool-visible-after-session-switch.e2e.test.ts': {
     cases: [{ id: 'SWITCH-10', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--daytona', engine: 'v1' } }],
   },
+  'unfinished-tool-lifecycle.e2e.test.ts': {
+    cases: [{ id: 'STOP-01', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v1' } }],
+  },
 };
 
 export const registeredCases = Object.freeze(Object.entries(definitions).flatMap(([spec, definition]) =>
