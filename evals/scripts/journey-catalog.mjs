@@ -10,6 +10,7 @@ const definitions = {
   'packaged-first-launch.e2e.test.ts': { name: 'Open a fresh cloud or enterprise install', placement: 'local' },
   // Boots the packaged enterprise artifact twice (fresh and pre-activated); only packaged-smoke provides that binary.
   'packaged-preactivation-updater.e2e.test.ts': { name: 'Keep an unactivated enterprise install from updating itself', placement: 'local' },
+  'packaged-activated-launch.e2e.test.ts': { name: 'Open an already-activated enterprise install', placement: 'local' },
   'org-team-lifecycle-critical-path.e2e.test.ts': { name: 'Set up a working two-person team', critical: true, model: 'live' },
   'desktop-policy-restricted-mode.e2e.test.ts': {
     // The rollback case severs local child IPC and faults its loopback transport.
