@@ -128,8 +128,10 @@ test("the composer stays editable when snapshot refresh fails or the model is un
   const unavailableRoot = createRoot(unavailableContainer);
   const platform = createDefaultPlatform();
   let sendCount = 0;
+  const platform = createDefaultPlatform();
 
   const surface = (targetSessionId: string, modelUnavailable: boolean) => (
+    <PlatformProvider value={platform}>
     <QueryClientProvider client={queryClient}>
       <LocalProvider>
         <ShellConfigProvider>
@@ -176,6 +178,7 @@ test("the composer stays editable when snapshot refresh fails or the model is un
         </ShellConfigProvider>
       </LocalProvider>
     </QueryClientProvider>
+    </PlatformProvider>
   );
 
   try {
