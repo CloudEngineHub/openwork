@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { browserScript, type Surface } from "@openwork/cdp";
 import type { Seed } from "@openwork/env";
-import { go, runWorkflow, saveWorkflow } from "@openwork/behaviors";
+import { go, runWorkflow, saveWorkflow, waitFor } from "@openwork/behaviors";
 import { connect, debuggerUrlFor, evaluate, listTargets } from "@openwork/cdp";
 import { configureProvider } from "./chat.ts";
 import { defaultDaytonaExec, execInSandbox } from "@openwork/hosts";
@@ -300,7 +300,16 @@ export async function savedAppCreation(seed: Seed) {
         }, [tabId]));
       }
     },
-    open: (path: string) => go(app, path),
+    // `go` only sets the hash; the page being left stays mounted until the router
+    // commits, and the dashboard and the app page share control labels and preview
+    // text. Return once the destination has rendered its own root so the spec's
+    // next observation cannot land on the page it just left.
+    async open(path: string) {
+      await go(app, path);
+      const root = /^\/dashboard\/apps\//.test(path) ? "[data-app-header]" : /^\/dashboard(?:[?#]|$)/.test(path) ? "[data-dashboard-page]" : null;
+      if (!root) return;
+      await waitFor(app, browserScript((selector) => document.querySelector(selector) !== null, [root]), { timeoutMs: 30_000, label: `${path} to render ${root}` });
+    },
     previewText: async () => String(await inPreview("read")),
     showDetails: () => inPreview("details"),
     receiptId: field(firstRun, "receiptId"),
