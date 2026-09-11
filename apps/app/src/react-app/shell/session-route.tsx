@@ -126,6 +126,7 @@ import {
   applySessionRevert,
   applySessionUnrevert,
   permissionKey,
+  seedCreatedSessionSnapshot,
 } from "@/react-app/domains/session/sync/session-sync";
 import { draftToParts } from "@/react-app/domains/session/sync/draft-parts";
 import { useSessionInteractions } from "@/react-app/domains/session/sync/use-session-interactions";
@@ -2278,6 +2279,7 @@ export function SessionRoute() {
       }
       useComposerStateStore.setState({ pendingFocusSessionId: session.id });
       rememberPendingCreatedSession(workspaceId, session.id);
+      seedCreatedSessionSnapshot(workspaceId, session);
       applyLastUsedModelToSession(session.id);
       setSessionsByWorkspaceId((current) => {
         const next = {
