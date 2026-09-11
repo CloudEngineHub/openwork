@@ -180,7 +180,9 @@ class DaytonaPlacementHost implements Host {
   }
 
   async #provision(name: string, surface: "desktop" | "web", options?: ElectronSurfaceOptions): Promise<PlacedSurface> {
-    if (this.#preparedSandbox && this.#preparedHost) {
+    // The pooled lane prepares one desktop sandbox per worker; surfaces share
+    // it unless a spec asks for its own (two desktops on two sandboxes).
+    if (this.#preparedSandbox && this.#preparedHost && !options?.ownSandbox) {
       if (options?.release) throw new Error("Published release previews require a newly owned Daytona sandbox.");
       return {
         host: this.#preparedHost,
