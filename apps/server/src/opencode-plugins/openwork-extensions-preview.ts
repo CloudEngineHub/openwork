@@ -22,6 +22,12 @@ import {
 } from "./openwork-extensions-preview-steering.js";
 import {
   buildOpenworkProviderContributions,
+  sessionCreateArgsSchema,
+  sessionModelArgSchema,
+  sessionReadArgsSchema,
+  sessionSearchArgsSchema,
+  sessionSendArgsSchema,
+  sessionTimestampMs,
   type ConnectSkillDescriptor,
   type EngineMcpDescriptor,
 } from "./openwork-provider-adapters.js";
@@ -73,42 +79,6 @@ const connectSkillsEnvelopeSchema = z.object({
   skills: z.array(connectSkillDescriptorSchema),
 }).passthrough();
 
-const sessionSearchArgsSchema = z.object({
-  query: z.string().trim().min(1).describe("Text to search for across OpenWork session titles and message transcripts."),
-  workspaceId: z.string().trim().optional().describe("Optional OpenWork workspace id/name to limit the search."),
-  limit: z.number().int().positive().max(20).optional().describe("Maximum matching sessions to return. Defaults to 10, max 20."),
-  scanLimit: z.number().int().positive().max(500).optional().describe("Maximum newest sessions to scan across matching workspaces. Defaults to 100, max 500."),
-  messageLimit: z.number().int().positive().max(1000).optional().describe("Maximum recent messages to load per scanned session. Defaults to 400, max 1000."),
-});
-
-const sessionReadArgsSchema = z.object({
-  sessionId: z.string().trim().min(1).describe("OpenWork/OpenCode session ID returned by session.search."),
-  workspaceId: z.string().trim().optional().describe("Optional OpenWork workspace id/name. Omit to resolve the session across all workspaces."),
-  count: z.number().int().positive().max(100).optional().describe("Number of recent transcript messages to return. Defaults to 30, max 100."),
-});
-
-// Same contract agents read back as `model`; `variant` may be omitted on input.
-const sessionModelArgSchema = openworkSessionModelSchema.extend({
-  variant: openworkSessionModelSchema.shape.variant.optional().describe("Reasoning effort variant (e.g. low, medium, high). Omit or null for the provider default."),
-});
-
-const sessionCreateArgsSchema = z.object({
-  sessions: z.array(z.object({
-    title: z.string().trim().min(1).max(120).describe("Short title shown in the OpenWork session list."),
-    prompt: z.string().trim().min(1).max(100_000).describe("Self-contained task to start in the new session."),
-    model: sessionModelArgSchema.optional().describe("Model and reasoning effort for this session. Overrides the top-level model."),
-  })).min(1).describe("One entry per new session to create and start."),
-  workspaceId: z.string().trim().optional().describe("Optional OpenWork workspace id/name. Defaults to the workspace containing the current session."),
-  model: sessionModelArgSchema.optional().describe("Model and reasoning effort for every created session unless an entry overrides it. Omit to use the engine default."),
-});
-
-const sessionSendArgsSchema = z.object({
-  sessionId: z.string().trim().min(1).describe("Session ID of the existing session to message, from session.search, session.read, or session.list_sessions."),
-  text: z.string().trim().min(1).max(100_000).describe("Prompt text appended to that session as a new user message."),
-  workspaceId: z.string().trim().optional().describe("Optional OpenWork workspace id/name. Omit to resolve the session across all workspaces."),
-  reveal: z.boolean().optional().describe("true to also open that session in the person's focused pane after sending. Defaults to false: nothing on screen changes."),
-});
-
 const workspaceSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
@@ -123,6 +93,8 @@ const workspaceListEnvelopeSchema = z.object({
 const sessionTimeSchema = z.object({
   created: z.number().optional(),
   updated: z.number().optional(),
+  // Set by the engine when a session is archived; absent or 0 otherwise.
+  archived: z.number().nullish(),
 }).passthrough();
 
 // The engine's session-level model: set from `model` at creation and updated
@@ -137,6 +109,7 @@ const sessionInfoSchema = z.object({
   id: z.string(),
   title: z.string().nullish(),
   directory: z.string().optional(),
+  parentID: z.string().nullish(),
   time: sessionTimeSchema.optional(),
   model: engineSessionModelSchema.nullish(),
 }).passthrough();
@@ -188,14 +161,21 @@ type OpenWorkWorkspace = z.infer<typeof workspaceSchema>;
 type SessionInfo = z.infer<typeof sessionInfoSchema>;
 type SessionModelArg = z.infer<typeof sessionModelArgSchema>;
 type SessionMessage = z.infer<typeof sessionMessageSchema>;
+type SessionSearchArgs = z.infer<typeof sessionSearchArgsSchema>;
+type SessionSearchMatchMode = NonNullable<SessionSearchArgs["match"]>;
 type SessionSearchSnippet = { before: string; match: string; after: string };
 type SessionSearchResult = {
   workspaceId: string;
   workspace: string;
   sessionId: string;
   title: string;
+  createdAt: number;
   updatedAt: number;
+  archived: boolean;
+  parentId: string | null;
   kind: "title" | "message";
+  /** The whole query text appeared contiguously (not just every term). */
+  phrase: boolean;
   snippet: SessionSearchSnippet;
   role?: string;
   messageId?: string;
@@ -330,6 +310,9 @@ function mergeTransformInputWithFactoryContext(input: unknown, factoryContext: O
 
 const SESSION_SEARCH_DEFAULT_LIMIT = 10;
 const SESSION_SEARCH_DEFAULT_SCAN_LIMIT = 100;
+// Title matching is one list call per workspace, so it covers every root
+// session; scanLimit only bounds the transcript phase.
+const SESSION_SEARCH_TITLE_LIST_LIMIT = 5000;
 const SESSION_SEARCH_DEFAULT_MESSAGE_LIMIT = 400;
 const SESSION_SEARCH_CONCURRENCY = 6;
 const SESSION_SNIPPET_BEFORE = 36;
@@ -542,6 +525,38 @@ function sessionUpdatedAt(session: SessionInfo): number {
   return session.time?.updated ?? session.time?.created ?? 0;
 }
 
+function sessionCreatedAt(session: SessionInfo): number {
+  return session.time?.created ?? session.time?.updated ?? 0;
+}
+
+function sessionArchived(session: SessionInfo): boolean {
+  const archived = session.time?.archived;
+  return typeof archived === "number" && archived > 0;
+}
+
+function sessionMetadata(workspace: OpenWorkWorkspace, session: SessionInfo) {
+  return {
+    workspaceId: workspace.id,
+    workspace: workspaceLabel(workspace),
+    sessionId: session.id,
+    title: sessionTitle(session),
+    createdAt: sessionCreatedAt(session),
+    updatedAt: sessionUpdatedAt(session),
+    archived: sessionArchived(session),
+    parentId: session.parentID ?? null,
+  };
+}
+
+function sessionPassesFilters(session: SessionInfo, args: SessionSearchArgs): boolean {
+  const createdAt = sessionCreatedAt(session);
+  if (args.createdAfter !== undefined && createdAt < sessionTimestampMs(args.createdAfter)) return false;
+  if (args.createdBefore !== undefined && createdAt > sessionTimestampMs(args.createdBefore)) return false;
+  const archived = args.archived ?? "include";
+  if (archived === "exclude" && sessionArchived(session)) return false;
+  if (archived === "only" && !sessionArchived(session)) return false;
+  return true;
+}
+
 /**
  * Session-level model from the engine record, or null when no model was ever
  * bound. The engine writes the literal variant "default" for a turn that
@@ -565,10 +580,13 @@ function messageText(message: SessionMessage): string {
   return parts.join("\n\n");
 }
 
-function findTextMatch(text: string, queryLower: string): { index: number; length: number } | null {
+type TextMatch = { index: number; length: number; phrase: boolean };
+
+function findTextMatch(text: string, queryLower: string, mode: SessionSearchMatchMode): TextMatch | null {
   const lower = text.toLowerCase();
   const exact = lower.indexOf(queryLower);
-  if (exact >= 0) return { index: exact, length: queryLower.length };
+  if (exact >= 0) return { index: exact, length: queryLower.length, phrase: true };
+  if (mode === "phrase") return null;
 
   const terms = queryLower.split(/\s+/).filter((term) => term.length > 1);
   if (terms.length < 2) return null;
@@ -577,47 +595,43 @@ function findTextMatch(text: string, queryLower: string): { index: number; lengt
   let firstLength = 0;
   for (const term of terms) {
     const index = lower.indexOf(term);
-    if (index < 0) return null;
+    if (index < 0) {
+      if (mode === "all") return null;
+      continue;
+    }
     if (index < firstIndex) {
       firstIndex = index;
       firstLength = term.length;
     }
   }
-  return Number.isFinite(firstIndex) ? { index: firstIndex, length: firstLength } : null;
+  return Number.isFinite(firstIndex) ? { index: firstIndex, length: firstLength, phrase: false } : null;
 }
 
-function titleSearchResult(workspace: OpenWorkWorkspace, session: SessionInfo, queryLower: string): SessionSearchResult | null {
-  const title = sessionTitle(session);
-  const text = `${title} ${workspaceLabel(workspace)}`;
-  const match = findTextMatch(text, queryLower);
+function titleSearchResult(workspace: OpenWorkWorkspace, session: SessionInfo, queryLower: string, mode: SessionSearchMatchMode): SessionSearchResult | null {
+  const text = `${sessionTitle(session)} ${workspaceLabel(workspace)}`;
+  const match = findTextMatch(text, queryLower, mode);
   if (!match) return null;
   return {
-    workspaceId: workspace.id,
-    workspace: workspaceLabel(workspace),
-    sessionId: session.id,
-    title,
-    updatedAt: sessionUpdatedAt(session),
+    ...sessionMetadata(workspace, session),
     kind: "title",
+    phrase: match.phrase,
     snippet: buildSessionSnippet(text, match.index, match.length),
   };
 }
 
-function messageSearchResult(workspace: OpenWorkWorkspace, session: SessionInfo, messages: SessionMessage[], queryLower: string): SessionSearchResult | null {
+function messageSearchResult(workspace: OpenWorkWorkspace, session: SessionInfo, messages: SessionMessage[], queryLower: string, mode: SessionSearchMatchMode): SessionSearchResult | null {
   let fallback: SessionSearchResult | null = null;
   for (const [index, message] of messages.entries()) {
     const role = message.info.role;
     if (role !== "user" && role !== "assistant") continue;
     const text = messageText(message);
     if (!text) continue;
-    const match = findTextMatch(text, queryLower);
+    const match = findTextMatch(text, queryLower, mode);
     if (!match) continue;
     const result: SessionSearchResult = {
-      workspaceId: workspace.id,
-      workspace: workspaceLabel(workspace),
-      sessionId: session.id,
-      title: sessionTitle(session),
-      updatedAt: sessionUpdatedAt(session),
+      ...sessionMetadata(workspace, session),
       kind: "message",
+      phrase: match.phrase,
       role,
       messageId: message.info.id,
       messageIndex: index,
@@ -627,6 +641,12 @@ function messageSearchResult(workspace: OpenWorkWorkspace, session: SessionInfo,
     if (!fallback) fallback = result;
   }
   return fallback;
+}
+
+/** Sessions whose title matched, or whose snippet is a phrase match, first; then newest activity. */
+function rankSearchResults(matches: SessionSearchResult[], titleMatched: ReadonlySet<string>): SessionSearchResult[] {
+  const rank = (result: SessionSearchResult) => (titleMatched.has(result.sessionId) || result.phrase ? 0 : 1);
+  return matches.sort((left, right) => rank(left) - rank(right) || right.updatedAt - left.updatedAt);
 }
 
 async function listOpenWorkWorkspaces(): Promise<OpenWorkWorkspace[]> {
@@ -702,10 +722,12 @@ async function readSessionActivity(workspace: OpenWorkWorkspace, sessionId: stri
   return sessionActivityFrom(statuses, permissions, questions, sessionId, descendantIds);
 }
 
-async function readSessionMessages(workspace: OpenWorkWorkspace, sessionId: string, limit: number): Promise<SessionMessage[]> {
-  const query = new URLSearchParams({ limit: String(limit) });
+// The engine returns the newest `limit` messages; without a limit it returns
+// the whole transcript, oldest first.
+async function readSessionMessages(workspace: OpenWorkWorkspace, sessionId: string, limit?: number): Promise<SessionMessage[]> {
+  const query = limit === undefined ? "" : `?${new URLSearchParams({ limit: String(limit) }).toString()}`;
   return z.array(sessionMessageSchema).parse(
-    await serverGet(`/workspace/${encodeURIComponent(workspace.id)}/opencode/session/${encodeURIComponent(sessionId)}/message?${query.toString()}`),
+    await serverGet(`/workspace/${encodeURIComponent(workspace.id)}/opencode/session/${encodeURIComponent(sessionId)}/message${query}`),
   );
 }
 
@@ -726,6 +748,7 @@ async function searchOpenWorkSessions(rawArgs: unknown): Promise<object> {
   const resultLimit = args.limit ?? SESSION_SEARCH_DEFAULT_LIMIT;
   const scanLimit = args.scanLimit ?? SESSION_SEARCH_DEFAULT_SCAN_LIMIT;
   const messageLimit = args.messageLimit ?? SESSION_SEARCH_DEFAULT_MESSAGE_LIMIT;
+  const mode = args.match ?? "all";
   const queryLower = args.query.trim().toLowerCase();
   const workspaces = filterWorkspaces(await listOpenWorkWorkspaces(), args.workspaceId);
   if (!workspaces.length) {
@@ -736,23 +759,34 @@ async function searchOpenWorkSessions(rawArgs: unknown): Promise<object> {
   const workspaceErrors: Array<{ workspaceId: string; workspace: string; error: string }> = [];
   await Promise.all(workspaces.map(async (workspace) => {
     try {
-      const items = await listWorkspaceSessions(workspace, scanLimit);
-      for (const session of items) sessions.push({ workspace, session });
+      const items = await listWorkspaceSessions(workspace, SESSION_SEARCH_TITLE_LIST_LIMIT);
+      for (const session of items) if (sessionPassesFilters(session, args)) sessions.push({ workspace, session });
     } catch (error) {
       workspaceErrors.push({ workspaceId: workspace.id, workspace: workspaceLabel(workspace), error: unknownErrorMessage(error) });
     }
   }));
 
-  const sessionsToScan = sessions
-    .sort((left, right) => sessionUpdatedAt(right.session) - sessionUpdatedAt(left.session))
-    .slice(0, scanLimit);
+  sessions.sort((left, right) => sessionUpdatedAt(right.session) - sessionUpdatedAt(left.session));
+  const sessionsToScan = sessions.slice(0, scanLimit);
   const matches: SessionSearchResult[] = [];
+  const titleMatched = new Set<string>();
 
+  // Title phase: every filtered root session, one list call per workspace.
+  for (const { workspace, session } of sessions.slice(scanLimit)) {
+    const titleMatch = titleSearchResult(workspace, session, queryLower, mode);
+    if (!titleMatch) continue;
+    titleMatched.add(session.id);
+    matches.push(titleMatch);
+  }
+
+  // Transcript phase: only the scanLimit newest sessions are read. A message
+  // match wins the snippet, but the title match still owns the rank.
   await forEachWithConcurrency(sessionsToScan, SESSION_SEARCH_CONCURRENCY, async ({ workspace, session }) => {
-    const titleMatch = titleSearchResult(workspace, session, queryLower);
+    const titleMatch = titleSearchResult(workspace, session, queryLower, mode);
+    if (titleMatch) titleMatched.add(session.id);
     try {
       const messages = await readSessionMessages(workspace, session.id, messageLimit);
-      const messageMatch = messageSearchResult(workspace, session, messages, queryLower);
+      const messageMatch = messageSearchResult(workspace, session, messages, queryLower, mode);
       if (messageMatch) matches.push(messageMatch);
       else if (titleMatch) matches.push(titleMatch);
     } catch {
@@ -760,13 +794,12 @@ async function searchOpenWorkSessions(rawArgs: unknown): Promise<object> {
     }
   });
 
-  const results = matches
-    .filter((match) => match !== undefined)
-    .sort((left, right) => right.updatedAt - left.updatedAt);
+  const results = rankSearchResults(matches, titleMatched);
 
   return {
     ok: true,
     query: args.query,
+    match: mode,
     workspaceCount: workspaces.length,
     totalCandidateSessions: sessions.length,
     scannedSessions: sessionsToScan.length,
@@ -779,9 +812,25 @@ async function searchOpenWorkSessions(rawArgs: unknown): Promise<object> {
   };
 }
 
+type ReadableMessage = { index: number; id: string; role: string; createdAt: number | null; text: string };
+
+function readableMessages(messages: SessionMessage[]): ReadableMessage[] {
+  return messages
+    .map((message, index) => ({
+      index,
+      id: message.info.id,
+      role: message.info.role,
+      createdAt: message.info.time?.created ?? null,
+      text: messageText(message),
+    }))
+    .filter((message) => message.text.trim().length > 0);
+}
+
 async function readOpenWorkSession(rawArgs: unknown): Promise<object> {
   const args = sessionReadArgsSchema.parse(rawArgs);
   const count = args.count ?? 30;
+  const from = args.from ?? "end";
+  const summary = args.summary ?? false;
   const workspaces = filterWorkspaces(await listOpenWorkWorkspaces(), args.workspaceId);
   if (!workspaces.length) {
     return { ok: false, error: args.workspaceId ? `No workspace matched ${args.workspaceId}` : "No OpenWork workspaces are available" };
@@ -790,31 +839,37 @@ async function readOpenWorkSession(rawArgs: unknown): Promise<object> {
   for (const workspace of workspaces) {
     try {
       const session = await readWorkspaceSession(workspace, args.sessionId);
+      // Reading from the start or summarizing needs the whole transcript.
+      const needsFullTranscript = summary || from === "start";
       const [messages, activity] = await Promise.all([
-        readSessionMessages(workspace, args.sessionId, count),
+        readSessionMessages(workspace, args.sessionId, needsFullTranscript ? undefined : count),
         readSessionActivity(workspace, args.sessionId),
       ]);
-      const readable = messages
-        .map((message, index) => ({
-          index,
-          id: message.info.id,
-          role: message.info.role,
-          text: messageText(message),
-        }))
-        .filter((message) => message.text.trim().length > 0);
-      return {
-        ok: true,
-        workspaceId: workspace.id,
-        workspace: workspaceLabel(workspace),
-        sessionId: session.id,
-        title: sessionTitle(session),
-        updatedAt: sessionUpdatedAt(session),
+      const readable = readableMessages(messages);
+      const metadata = {
+        ...sessionMetadata(workspace, session),
         status: activity.status,
         working: activity.working,
+      };
+      if (summary) {
+        return {
+          ok: true,
+          ...metadata,
+          model: sessionModelOf(session),
+          totalMessages: readable.length,
+          firstUser: readable.find((message) => message.role === "user") ?? null,
+          lastAssistant: [...readable].reverse().find((message) => message.role === "assistant") ?? null,
+        };
+      }
+      const window = from === "start" ? readable.slice(0, count) : readable.slice(-count);
+      return {
+        ok: true,
+        ...metadata,
         model: sessionModelOf(session),
-        returned: readable.length,
+        from,
+        returned: window.length,
         requested: count,
-        messages: readable,
+        messages: window,
       };
     } catch {
       if (args.workspaceId) break;
