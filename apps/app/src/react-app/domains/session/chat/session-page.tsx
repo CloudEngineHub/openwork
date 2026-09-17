@@ -1777,6 +1777,7 @@ export function SessionPage(props: SessionPageProps) {
                             client={props.openworkServerClient!}
                             environmentClient={props.environmentClient}
                             workspaceId={props.runtimeWorkspaceId!}
+                            rendererWorkspaceId={props.selectedWorkspaceId}
                             sessionId={props.selectedSessionId!}
                             archived={archivedInWorkspace(props.selectedWorkspaceId, props.selectedSessionId)}
                             onRestoreSession={async () => { await props.onArchiveSession?.(props.selectedSessionId!, false); }}
@@ -1837,6 +1838,7 @@ export function SessionPage(props: SessionPageProps) {
                                   client={splitPaneRuntime.client}
                                   environmentClient={splitPaneRuntime.environmentClient}
                                   workspaceId={splitPaneRuntime.runtimeWorkspaceId}
+                                  rendererWorkspaceId={splitSession.workspaceId}
                                   workspaceRoot={splitPaneRuntime.workspaceRoot}
                                   sessionId={splitSession.sessionId}
                                   archived={archivedInWorkspace(splitSession.workspaceId, splitSession.sessionId)}
