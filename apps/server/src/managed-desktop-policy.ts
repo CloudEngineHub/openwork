@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { desktopConfigSchema, type DesktopConfig } from "@openwork/types/den/desktop-policies-runtime";
+import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, desktopConfigSchema, type DesktopConfig } from "@openwork/types/den/desktop-policies-runtime";
 import type { CloudProviderDenSession } from "./cloud-provider-sync.js";
 import type { ServerConfig } from "./types.js";
 import { isRecord } from "./workspace-kv-store.js";
@@ -90,9 +90,9 @@ class ManagedDesktopPolicy {
     this.session = null;
     this.generation++;
     this.installed = undefined;
-    // Keep the last managed restrictions until a fresh identity is verified.
   }
   current(): Promise<DesktopConfig | null> {
+    if (!DESKTOP_POLICY_ENFORCEMENT_ENABLED) return Promise.resolve(null);
     if (this.fetching?.generation === this.generation) return this.fetching.promise;
     const generation = this.generation;
     const promise = this.fetchCurrent();
@@ -156,10 +156,10 @@ class ManagedDesktopPolicy {
     const session = this.session;
     const generation = this.generation;
     if (!session) {
-      const persisted = await readGlobalRuntimeOpencodeConfig(this.config);
+      await readGlobalRuntimeOpencodeConfig(this.config);
       // A local-only read cannot grant access after a managed identity arrives.
       this.identityChanged(generation);
-      if (persisted.managedPolicy) throw new ApiError(403, "policy_unavailable", "Sign in to verify your organization's policy before continuing.");
+      // A cached policy is not device enrollment: enforcement follows the session.
       return null;
     }
     let policy: DesktopConfig;
@@ -177,6 +177,7 @@ class ManagedDesktopPolicy {
     return policy;
   }
   async assertRequest(request: Request, path: string, engine = false): Promise<void> {
+    if (!DESKTOP_POLICY_ENFORCEMENT_ENABLED) return;
     const generation = this.generation;
     try { await this.assertInstalledRequest(request, path, engine, generation); }
     finally { this.identityChanged(generation); }
@@ -228,6 +229,7 @@ class ManagedDesktopPolicy {
     if ("providerID" in model) await assert("model", model);
   }
   async assert(action: ManagedPolicyAction, input: Record<string, unknown> = {}): Promise<void> {
+    if (!DESKTOP_POLICY_ENFORCEMENT_ENABLED) return;
     const generation = this.generation;
     const policy = await this.installedPolicy(generation);
     this.identityChanged(generation);
