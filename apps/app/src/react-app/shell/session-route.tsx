@@ -2078,17 +2078,31 @@ export function SessionRoute() {
     workspaceConnectionStateById,
     workspaces,
   ]);
+  // Once revealed, background refreshes must not replace usable content. A
+  // missing model is an actionable composer state, not a startup dependency.
+  const cloudContentRevealed = useRef(false);
+  const cloudRoutePending = !selectedWorkspaceError && !routeNotFoundMessage &&
+    (effectiveLoading || !opencodeClient || !selectedWorkspaceId);
+  useEffect(() => {
+    if (!cloudRoutePending && opencodeClient && selectedWorkspaceId && !selectedWorkspaceError && !routeNotFoundMessage) {
+      cloudContentRevealed.current = true;
+    }
+  }, [cloudRoutePending, opencodeClient, selectedWorkspaceId, selectedWorkspaceError, routeNotFoundMessage]);
   const cloudWorkspaceMainContentDecision = mapCloudWorkspaceMainContentDecision({
     status: cloudWorkspace.viewModel.variant,
     hasWorkspaces: Boolean(surfaceProps),
     gatewayMode: cloudWorkspace.gatewayMode && cloudWorkspace.visible,
+    startupPending: !cloudContentRevealed.current && cloudRoutePending,
   });
   const cloudWorkspaceReadyForRouteErrors =
     !cloudWorkspace.gatewayMode ||
     !cloudWorkspace.visible ||
     cloudWorkspaceStatusHasReadyContent(cloudWorkspace.viewModel.variant);
   const cloudWorkspaceMainContentTakeover = cloudWorkspaceMainContentDecision === "takeover" ? (
-    <CloudWorkspaceBootTakeover decision={cloudWorkspaceMainContentDecision} />
+    <CloudWorkspaceBootTakeover
+      decision={cloudWorkspaceMainContentDecision}
+      onReconnect={() => void refreshRouteState({ supersede: true })}
+    />
   ) : null;
   const gatedRouteNotFoundMessage = cloudWorkspaceReadyForRouteErrors ? routeNotFoundMessage : null;
 
@@ -3482,7 +3496,7 @@ export function SessionRoute() {
           ? t("status.connected")
           : (modelUnavailableMessage ?? t("session.loading_detail"))
       }
-      busyHint={organizationModelsEmpty ? t("models.organization_models_empty") : effectiveLoading ? t("session.loading_detail") : null}
+      busyHint={cloudWorkspaceMainContentTakeover ? null : organizationModelsEmpty ? t("models.organization_models_empty") : effectiveLoading ? t("session.loading_detail") : null}
       startupPhase={effectiveLoading ? "nativeInit" : "ready"}
       providerConnectedIds={providerConnectedIds}
       hasUsableModel={hasUsableModel}
@@ -3847,7 +3861,7 @@ export function SessionRoute() {
           />
         ) : cloudWorkspaceMainContentTakeover
       }
-      mainContentTitle={extensionsMainOpen ? t("settings.tab_extensions") : undefined}
+      mainContentTitle={extensionsMainOpen ? t("settings.tab_extensions") : cloudWorkspaceMainContentTakeover ? "Cloud workspace" : undefined}
       mainContentHeaderActionsRef={extensionsMainOpen ? setLibraryHeaderActionsTarget : undefined}
       extensionsActive={extensionsMainOpen}
       onAccessibleTargetsChange={setPaletteAccessibleTargets}
