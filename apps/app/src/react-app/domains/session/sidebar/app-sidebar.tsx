@@ -796,6 +796,7 @@ export type AppSidebarProps = {
   onStartResize?: React.PointerEventHandler<HTMLButtonElement>;
   onOpenAccountSettings?: () => void;
   onOpenExtensions: () => void;
+  mobileChatActions?: React.ReactNode;
   extensionsActive?: boolean;
   /** Live app status, shown inside the footer account menu. */
   status: Omit<AccountStatusMenuProps, "onOpenAccountSettings">;
@@ -1037,6 +1038,7 @@ export function AppSidebar(props: AppSidebarProps) {
             <SidebarMenuItem>
               <NotificationBell variant="sidebar-row" />
             </SidebarMenuItem>
+            {props.mobileChatActions}
           </SidebarMenu>
         </SidebarHeader>
         <SidebarReorderScope>
