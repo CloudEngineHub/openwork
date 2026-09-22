@@ -48,10 +48,11 @@ function withoutWindow<T>(run: () => T): T {
   }
 }
 
-function renderList(messages: UIMessage[]) {
+function renderList(messages: UIMessage[], readOnly = false) {
   return withoutWindow(() => renderToStaticMarkup(
     <PlatformProvider value={createDefaultPlatform()}>
     <MessageListProvider
+      readOnly={readOnly}
       workspaceId="ws"
       sessionId="session"
       showThinking={true}
@@ -65,9 +66,8 @@ function renderList(messages: UIMessage[]) {
       onEditUserMessage={() => {}}
       onMcpReconnect={() => Promise.reject(new Error("unused"))}
       onMcpReopenAuthorization={() => Promise.resolve()}
-      onMcpRetry={() => {}}
     >
-      <MessageList messages={messages} status="ready" />
+      <MessageList messages={messages} status="ready" activityStatus="idle" />
     </MessageListProvider>
     </PlatformProvider>
   ));
@@ -81,6 +81,23 @@ const userMessage: UIMessage = {
 };
 
 describe("finished turn step fold (single OpenCode message per turn)", () => {
+  test.each([true, false])("unfinished idle tools are quiet in read-only=%s current and history views", (readOnly) => {
+    const assistant: UIMessage = {
+      id: "unfinished-assistant", role: "assistant",
+      parts: [{
+        type: "dynamic-tool", toolName: "openwork-cloud_execute_capability", toolCallId: "unfinished-probe",
+        state: "input-available", input: { name: "mcp:emc_probe:*" },
+      }],
+    };
+    for (const messages of [[userMessage, assistant], [userMessage, assistant, { ...userMessage, id: "later-user" }]]) {
+      const markup = renderList(messages, readOnly);
+      expect(markup).toContain("status unavailable");
+      expect(markup).not.toContain("Task interrupted");
+      expect(markup).not.toContain("Retry to continue");
+      expect(markup).not.toContain("animate-spin");
+      expect(markup).not.toContain("ow-text-shimmer");
+    }
+  });
   test("folds interleaved steps into a 'Worked for …' line and keeps the answer", () => {
     const assistant: UIMessage = {
       id: "assistant-1",
