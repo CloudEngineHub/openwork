@@ -142,8 +142,16 @@ credential. Update the controller pin after reviewing its code and dependencies.
 Each world/commit is serialized in CI; the provider snapshot cache and builder lock
 also deduplicate reruns and concurrent reviewer launches. Existing snapshots are
 reused until their seven-day expiry. Prewarming does not create a shared reviewer VM:
-each click still clones separately. ACME starts and seeds its services after cloning,
-so prewarming removes installation/build time, not all startup time.
+each click still clones separately. ACME is fully seeded, its service chain verified, and browser entry points compiled
+before its memory snapshot is captured. Clones resume those processes; launch only
+assigns public access, renews expired demo sessions if needed, and checks readiness.
+
+After prewarming, CI measures two real ACME launches and verifies restored processes,
+independent databases/access, sign-in, and a fresh AI Gateway reply. The prewarm job
+summary and `freestyle-launch-proof` artifact contain sanitized measurements. These
+measure controller launch through public readiness, **not** reviewer HTTP overhead
+or browser rendering. The ACME selected-proof report verifies the world recipe;
+it does not benchmark Freestyle. Do not quote a direct launch timing as click-to-usable.
 
 Set `FREESTYLE_API_KEY` in the protected Vercel Preview environment. Every report
 offers **Launch in Freestyle**. The server reads the commit from the stored report;
