@@ -5,13 +5,14 @@ import { deletePreview, findSnapshot, launchPreview, snapshotSlug, waitForPublic
 import { ensureSnapshot } from "../src/builder.ts";
 
 const sha = "a".repeat(40);
-function mockApi() {
+function mockApi(snapshotCreatedAt = new Date().toISOString()) {
   const creates: Record<string, unknown>[] = [];
   const writes: string[] = [];
   const deleted: string[] = [];
+  const commands: string[] = [];
   const api = new Freestyle({ apiKey: "synthetic", fetch: async (input, init) => {
     const path = new URL(String(input)).pathname;
-    if (path.startsWith("/v5/snapshots/")) return Response.json({ id: "sh-template", slug: snapshotSlug(sha) });
+    if (path.startsWith("/v5/snapshots/")) return Response.json({ id: "sh-template", slug: snapshotSlug(sha), createdAt: snapshotCreatedAt });
     if (path === "/v5/vms" && init?.method === "POST") {
       const body: unknown = JSON.parse(String(init.body));
       assert.ok(typeof body === "object" && body !== null && !Array.isArray(body));
@@ -19,14 +20,16 @@ function mockApi() {
       return Response.json({ id: `vm-${creates.length}`, createdAt: new Date().toISOString() });
     }
     if (path.includes("/fs/")) { writes.push(String(init?.body)); return Response.json({}); }
-    if (path.endsWith("/exec-await")) return Response.json({ statusCode: 0, stdout: "" });
+    if (path.endsWith("/exec-await")) { commands.push(String(init?.body)); return Response.json({ statusCode: 0, stdout: "" }); }
     if (init?.method === "DELETE") { deleted.push(path); return new Response(null, { status: 204 }); }
     throw new Error(`Unexpected provider request ${init?.method} ${path}`);
   } });
-  return { api, creates, writes, deleted };
+  return { api, creates, writes, deleted, commands };
 }
 
-const reachable: typeof fetch = async () => new Response(null, { status: 303, headers: { "set-cookie": "__Host-openwork-preview=synthetic" } });
+const reachable: typeof fetch = async (input) => new URL(String(input)).pathname === "/__openwork_launch"
+  ? new Response(null, { status: 303, headers: { "set-cookie": "__Host-openwork-preview=synthetic" } })
+  : new Response("<title>OpenWork</title>", { status: 200 });
 
 test("concurrent launches from one report get separate VMs, credentials and provider expiry", async () => {
   const { api, creates, writes } = mockApi();
@@ -57,14 +60,39 @@ test("failed public readiness cleans up the newly allocated VM", async () => {
 test("new public routes can recover from propagation errors without allocating another VM", async () => {
   const { api, creates, deleted } = mockApi();
   let attempts = 0;
-  await launchPreview({ gitSha: sha }, api, async () => {
+  await launchPreview({ gitSha: sha }, api, async (input) => {
     attempts++;
     if (attempts === 1) return new Response(null, { status: 502 });
-    return reachable("https://unused.example");
+    return reachable(input);
   });
-  assert.equal(attempts, 2);
+  assert.equal(attempts, 3);
   assert.equal(creates.length, 1);
   assert.deepEqual(deleted, []);
+});
+
+test("launch waits through the restored app's first transient 502", async () => {
+  const { api, creates } = mockApi();
+  let pageRequests = 0;
+  await launchPreview({ gitSha: sha }, api, async (input) => {
+    if (new URL(String(input)).pathname === "/") {
+      pageRequests++;
+      if (pageRequests === 1) return new Response("starting", { status: 502 });
+    }
+    return reachable(input);
+  });
+  assert.equal(pageRequests, 2);
+  assert.equal(creates.length, 1);
+});
+
+test("fresh ACME clones skip guest startup while old snapshots rotate their demo session", async () => {
+  const fresh = mockApi();
+  const ready = await launchPreview({ gitSha: sha, world: "acme-web" }, fresh.api, reachable);
+  assert.equal(fresh.commands.length, 0);
+  assert.ok(ready.outputs.denWeb?.value.includes("__openwork_launch"));
+  const old = mockApi(new Date(Date.now() - 6 * 24 * 60 * 60_000).toISOString());
+  await launchPreview({ gitSha: sha, world: "acme-web" }, old.api, reachable);
+  assert.equal(old.commands.length, 1);
+  assert.match(old.commands[0], /resume\.mjs/);
 });
 
 test("public readiness retries are bounded and do not conceal denied access", async () => {

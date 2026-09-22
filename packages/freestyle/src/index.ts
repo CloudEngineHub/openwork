@@ -1,6 +1,7 @@
 import { templateOrigins } from "./origins.mjs";
 import { parsePreviewOutputs, type PreviewOutputs } from "./outputs.ts";
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { Freestyle, FreestyleApiError } from "freestyle";
 import type { Vm } from "freestyle";
@@ -61,16 +62,25 @@ export class PreviewLaunchError extends Error {
   }
 }
 
-/** New TLS routes can briefly return 404/502 before the restored VM is reachable. */
+/** The private gateway can answer before the restored app accepts its first request. */
 export async function waitForPublicAccess(url: string, probe: typeof fetch = fetch, pause = delay): Promise<void> {
   let status = 0;
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
       const response = await probe(url, { redirect: "manual", signal: AbortSignal.timeout(3_000) });
       status = response.status;
-      const ready = status === 303 && response.headers.get("set-cookie")?.startsWith("__Host-openwork-preview=");
+      const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
       await response.body?.cancel();
-      if (ready) return;
+      if (status === 303 && cookie?.startsWith("__Host-openwork-preview=")) {
+        const page = await probe(new URL("/", url), {
+          headers: { cookie }, signal: AbortSignal.timeout(3_000),
+        });
+        status = page.status;
+        const html = status === 200 ? await page.text() : "";
+        if (status !== 200) await page.body?.cancel();
+        if (status === 200 && html.includes("OpenWork")) return;
+        if (status === 200) status = 502; // A proxy warmup page is not the app.
+      }
       if (![404, 408, 425, 429].includes(status) && status < 500) break;
     } catch (error) {
       if (!(error instanceof TypeError) && !(error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name))) throw error;
@@ -111,14 +121,21 @@ export async function launchPreview(
   let stage = "assign-access";
   try {
     const expiresAt = new Date(Date.parse(data.createdAt) + minutes * 60_000).toISOString();
-    await vm.fs.writeTextFile(ACCESS_FILE, JSON.stringify({ token, expiresAt, origins, ...(origins ? { templateOrigins } : {}) }));
-    await execChecked(vm, "chmod 600 /opt/openwork-preview/access.json");
+    await vm.fs.writeTextFile(ACCESS_FILE, JSON.stringify({ token, expiresAt, origins, ...(origins ? { templateOrigins } : {}) }), { mode: 0o600 });
     let outputs: PreviewOutputs = {};
     if (world === "acme-web") {
-      // Processes, DB state, and compiled pages resume from CI's live snapshot.
-      // This only renews the demo session and checks the restored services.
-      stage = "resume-services";
-      await execChecked(vm, "node /opt/openwork-preview/resume.mjs", 60_000);
+      // Den's demo session lasts 7 days; snapshots last at most 7 days and
+      // sandboxes at most 23h50m. A snapshot younger than 5 days has enough
+      // session lifetime left for every allowed sandbox, even after warmup.
+      // CI already checks the complete running world before taking the snapshot.
+      const age = Date.now() - Date.parse(snapshot.createdAt);
+      if (!Number.isFinite(age) || age < 0 || age >= 5 * 24 * 60 * 60_000) {
+        stage = "resume-services";
+        // Older v4 snapshots may contain the previous renewal script, which
+        // only rotated already-expired sessions. Refresh it before reuse.
+        await vm.fs.writeTextFile("/opt/openwork-preview/resume.mjs", await readFile(new URL("./resume.mjs", import.meta.url), "utf8"), { mode: 0o600 });
+        await execChecked(vm, "node /opt/openwork-preview/resume.mjs", 60_000);
+      }
       stage = "read-outputs";
       outputs = parsePreviewOutputs(JSON.parse(await vm.fs.readTextFile("/opt/openwork-preview/outputs.json")));
       const serviceKeys = { app: "webUrl", den: "denWeb", api: "denApi", engine: "openworkUrl", gateway: "gatewayUrl" };
@@ -128,9 +145,6 @@ export async function launchPreview(
         outputs[key] = { value: `${origin}/__openwork_launch?token=${token}`, secret: true, group: "Services", note: "Ready · open this link to authorize this service" };
       }
       outputs.previewCookie = { value: `__Host-openwork-preview=${token}`, secret: true, group: "Developer access", note: "Cookie header for requests to this VM's private service URLs" };
-    } else {
-      stage = "check-services";
-      await execChecked(vm, "curl -fsS http://127.0.0.1:5178/ >/dev/null && node /opt/openwork-preview/health.mjs", 90_000);
     }
     const url = `https://${domain}/__openwork_launch?token=${token}`;
     stage = "public-access";
