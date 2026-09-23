@@ -12309,6 +12309,7 @@ export type GetV1InferenceProvidersUsageData = {
     groupBy?: "model" | "team" | "person";
     days?: string;
     filterIds?: string;
+    memberId?: string;
   };
   url: "/v1/inference-providers/usage";
 };
@@ -12745,6 +12746,92 @@ export type PostV1GatewayUsageLimitPoliciesByPolicyIdArchiveResponses = {
 
 export type PostV1GatewayUsageLimitPoliciesByPolicyIdArchiveResponse =
   PostV1GatewayUsageLimitPoliciesByPolicyIdArchiveResponses[keyof PostV1GatewayUsageLimitPoliciesByPolicyIdArchiveResponses];
+
+export type PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreData = {
+  body: {
+    revision: number;
+  };
+  path: {
+    policyId: string;
+  };
+  query?: never;
+  url: "/v1/gateway/usage-limit-policies/{policyId}/restore";
+};
+
+export type PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message?: string;
+  };
+  /**
+   * Sign-in required
+   */
+  401: {
+    error: string;
+    message?: string;
+  };
+  /**
+   * Not authorized or Gateway disabled
+   */
+  403: {
+    error: string;
+    message?: string;
+  };
+  /**
+   * Organization resource not found
+   */
+  404: {
+    error: string;
+    message?: string;
+  };
+  /**
+   * Policy revision or eligibility conflict
+   */
+  409: {
+    error: string;
+    message?: string;
+  };
+  /**
+   * Accounting unavailable
+   */
+  503: {
+    error: string;
+    message?: string;
+  };
+};
+
+export type PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreError =
+  PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreErrors[keyof PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreErrors];
+
+export type PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreResponses = {
+  /**
+   * Restore archived usage limit policy
+   */
+  200: {
+    id: string;
+    name: string;
+    hardLimit: boolean;
+    allowRequestReset: boolean;
+    revision: number;
+    limits: Array<{
+      timeframe: "day" | "week" | "month";
+      costLimitMicroUsd: number;
+    }>;
+    assignments: Array<{
+      id: string;
+      memberId: string | null;
+      teamId: string | null;
+      organization?: boolean;
+    }>;
+    archivedAt?: string | null;
+  };
+};
+
+export type PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreResponse =
+  PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreResponses[keyof PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreResponses];
 
 export type GetV1GatewayUsageLimitPoliciesByPolicyIdAssignmentsData = {
   body?: never;
@@ -20612,6 +20699,46 @@ export type PostV1ConfigObjectsByConfigObjectIdVersionsResponses = {
 export type PostV1ConfigObjectsByConfigObjectIdVersionsResponse =
   PostV1ConfigObjectsByConfigObjectIdVersionsResponses[keyof PostV1ConfigObjectsByConfigObjectIdVersionsResponses];
 
+export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestData = {
+  body?: never;
+  path: {
+    /**
+     * Den TypeID with 'cob_' prefix and a 26-character base32 suffix.
+     */
+    configObjectId: string;
+  };
+  query?: never;
+  url: "/v1/config-objects/{configObjectId}/versions/latest";
+};
+
+export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestErrors = {
+  /**
+   * The latest-version path parameters were invalid.
+   */
+  400: InvalidRequestError;
+  /**
+   * The caller must be signed in to view config object versions.
+   */
+  401: UnauthorizedError;
+  /**
+   * The config object version could not be found.
+   */
+  404: NotFoundError;
+};
+
+export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestError =
+  GetV1ConfigObjectsByConfigObjectIdVersionsLatestErrors[keyof GetV1ConfigObjectsByConfigObjectIdVersionsLatestErrors];
+
+export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestResponses = {
+  /**
+   * Latest config object version returned successfully.
+   */
+  200: PluginArchConfigObjectVersionDetailResponse;
+};
+
+export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestResponse =
+  GetV1ConfigObjectsByConfigObjectIdVersionsLatestResponses[keyof GetV1ConfigObjectsByConfigObjectIdVersionsLatestResponses];
+
 export type GetV1ConfigObjectsByConfigObjectIdVersionsByVersionIdData = {
   body?: never;
   path: {
@@ -20655,46 +20782,6 @@ export type GetV1ConfigObjectsByConfigObjectIdVersionsByVersionIdResponses = {
 
 export type GetV1ConfigObjectsByConfigObjectIdVersionsByVersionIdResponse =
   GetV1ConfigObjectsByConfigObjectIdVersionsByVersionIdResponses[keyof GetV1ConfigObjectsByConfigObjectIdVersionsByVersionIdResponses];
-
-export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestData = {
-  body?: never;
-  path: {
-    /**
-     * Den TypeID with 'cob_' prefix and a 26-character base32 suffix.
-     */
-    configObjectId: string;
-  };
-  query?: never;
-  url: "/v1/config-objects/{configObjectId}/versions/latest";
-};
-
-export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestErrors = {
-  /**
-   * The latest-version path parameters were invalid.
-   */
-  400: InvalidRequestError;
-  /**
-   * The caller must be signed in to view config object versions.
-   */
-  401: UnauthorizedError;
-  /**
-   * The config object version could not be found.
-   */
-  404: NotFoundError;
-};
-
-export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestError =
-  GetV1ConfigObjectsByConfigObjectIdVersionsLatestErrors[keyof GetV1ConfigObjectsByConfigObjectIdVersionsLatestErrors];
-
-export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestResponses = {
-  /**
-   * Latest config object version returned successfully.
-   */
-  200: PluginArchConfigObjectVersionDetailResponse;
-};
-
-export type GetV1ConfigObjectsByConfigObjectIdVersionsLatestResponse =
-  GetV1ConfigObjectsByConfigObjectIdVersionsLatestResponses[keyof GetV1ConfigObjectsByConfigObjectIdVersionsLatestResponses];
 
 export type PostV1ConfigObjectsByConfigObjectIdArchiveData = {
   body?: never;
