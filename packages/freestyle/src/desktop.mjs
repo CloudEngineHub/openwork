@@ -74,6 +74,7 @@ export async function startDesktop(stack, world) {
     OPENWORK_ELECTRON_DISABLE_PROTOCOL_REGISTRATION: "1",
     // The snapshot builder already fetched the sidecars and helpers.
     OPENWORK_ELECTRON_SKIP_SHARED_PREPARE: "1",
+    OPENWORK_ELECTRON_SKIP_WORKSPACE_BUILD: "1",
   };
   const launcher = existsSync("/workspace/.devcontainer/start-daytona-electron.sh")
     ? "bash /workspace/.devcontainer/start-daytona-electron.sh" : "pnpm --filter @openwork/desktop dev:electron";

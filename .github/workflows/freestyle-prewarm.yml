@@ -30,7 +30,7 @@ jobs:
           # Trusted, reviewed controller only. PR source is fetched inside the
           # credential-free guest VM; never checked out on this runner.
           # Update this pin only after reviewing controller/dependency changes.
-          ref: 4d2ac5afa740011713a456dcf364da25787d6eda
+          ref: aee28b3d102d89f9410c6e41c794a7d5e1bc9355
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -43,11 +43,21 @@ jobs:
       - name: Prepare reusable snapshot
         env:
           FREESTYLE_API_KEY: ${{ secrets.FREESTYLE_API_KEY }}
+          # Only the pinned host controller reads public Git tree metadata.
+          # Neither this token nor the Freestyle key enters any guest VM.
+          OPENWORK_PREVIEW_GITHUB_TOKEN: ${{ github.token }}
           PREVIEW_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PREVIEW_WORLD: ${{ matrix.world }}
         run: |
           node scripts/prepare-freestyle-preview.ts "$PREVIEW_SHA" "$PREVIEW_WORLD"
           echo "Prepared $PREVIEW_WORLD snapshot for $PREVIEW_SHA. Every launch still creates a separate VM." >> "$GITHUB_STEP_SUMMARY"
+      - name: Save sanitized snapshot preparation timings
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: freestyle-build-proof-${{ matrix.world }}
+          path: freestyle-build-proof-${{ matrix.world }}.json
+          retention-days: 7
+          if-no-files-found: error
       - name: Measure and verify two independent running clones
         if: matrix.world == 'acme-web'
         env:

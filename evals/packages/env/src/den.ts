@@ -284,7 +284,7 @@ async function runDbPush(databaseUrl: string, schema: "push" | "migrate" = "push
   try {
     const commands = schema === "migrate"
       ? [["--filter", "@openwork-ee/den-db", "db:migrate:local"]]
-      : process.env.OPENWORK_EVAL_DEN_RUNTIME_PREPARED === "1"
+      : (process.env.OPENWORK_EVAL_DEN_RUNTIME_PREPARED === "1" || process.env.OPENWORK_EVAL_DEN_API_PREPARED === "1")
       ? [
           ["--filter", "@openwork-ee/den-db", "exec", "node", "--import", "tsx", "./node_modules/drizzle-kit/bin.cjs", "push", "--config", "drizzle.config.ts"],
           ["--filter", "@openwork-ee/den-db", "exec", "node", "--import", "tsx", "scripts/ensure-schema-repairs.ts"],
@@ -306,7 +306,7 @@ async function runDbPush(databaseUrl: string, schema: "push" | "migrate" = "push
     const stderr = typeof error === "object" && error !== null && typeof Reflect.get(error, "stderr") === "string"
       ? Reflect.get(error, "stderr")
       : "";
-    throw new Error(`Ephemeral Den database ${schema} failed: ${messageText(error)}${stderr ? `\n${stderr}` : ""}`);
+    throw new Error(`Ephemeral Den database ${schema} failed: ${messageText(error)}${stderr ? `\n${stderr}` : ""}\n${childOutput(error, "stdout")}`);
   }
 }
 
@@ -326,7 +326,9 @@ async function runDemoOrgSeed(databaseUrl: string, webPort: number, logPath: str
   try {
     const result = await execFileAsync(
       "pnpm",
-      ["--filter", "@openwork-ee/den-api", "seed:demo-org", "--", "--reset"],
+      process.env.OPENWORK_EVAL_DEN_API_PREPARED === "1" || process.env.OPENWORK_EVAL_DEN_RUNTIME_PREPARED === "1"
+        ? ["--filter", "@openwork-ee/den-api", "exec", "tsx", "scripts/seed-demo-org.ts", "--reset"]
+        : ["--filter", "@openwork-ee/den-api", "seed:demo-org", "--", "--reset"],
       {
         cwd: REPO_ROOT,
         env: {
