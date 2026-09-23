@@ -97,17 +97,30 @@ async function prepareWorkspace(surface, world, { createAndSelectWorkspace, sele
   }
 }
 
+// The app's default for new conversations (Settings > default model). Unset, it
+// falls back to a public model the VM cannot reach, and sends time out.
+async function setDefaultModel(surface, world, evalIn, browserScript) {
+  const ref = `${world.model.providerId}/${world.model.modelId}`;
+  await evalIn(surface, browserScript((value) => {
+    localStorage.setItem("openwork.defaultModel", value);
+    window.dispatchEvent(new Event("openwork.defaultModelChanged"));
+  }, [ref]));
+}
+
 // Signs the running window in as the demo owner with the harness's own handoff,
 // over the launcher's debug port, then opens a workspace so the app is ready to
 // chat. Any sign-in failure leaves the real app signed out.
 async function signIn(world, den) {
   try {
-    const { attachSurface } = await import("/workspace/evals/packages/cdp/src/index.ts");
-    const { signInDesktopAs, createAndSelectWorkspace, selectModel } = await import("/workspace/evals/packages/behaviors/src/index.ts");
+    const { attachSurface, browserScript } = await import("/workspace/evals/packages/cdp/src/index.ts");
+    const { signInDesktopAs, createAndSelectWorkspace, selectModel, evalIn } = await import("/workspace/evals/packages/behaviors/src/index.ts");
     for (let attempt = 1; attempt <= 2; attempt++) {
       const surface = await attachSurface({ name: "preview-desktop", kind: "electron", hostKind: "local", cdpUrl: `http://127.0.0.1:${CDP_PORT}` }, { timeoutMs: 60_000 });
       try {
         await signInDesktopAs(surface, den, world.den.admin);
+        // Like the web preview, every new workspace and conversation starts on the
+        // world's AI Gateway model instead of the app's public default model.
+        await setDefaultModel(surface, world, evalIn, browserScript);
         await prepareWorkspace(surface, world, { createAndSelectWorkspace, selectModel });
         return true;
       }
@@ -128,7 +141,7 @@ export async function startDesktop(stack, world) {
   mkdirSync("/tmp/.X11-unix", { recursive: true, mode: 0o1777 });
   service(stack, "Xvfb", [DESKTOP_DISPLAY, "-screen", "0", "1440x900x24", "-nolisten", "tcp"], "xvfb");
   await waitFor(() => existsSync(`/tmp/.X11-unix/X${DESKTOP_DISPLAY.slice(1)}`), "display");
-  service(stack, "fluxbox", [], "fluxbox");
+  service(stack, "startxfce4", [], "xfce");
   service(stack, "x11vnc", ["-display", DESKTOP_DISPLAY, "-localhost", "-rfbport", String(VNC_PORT), "-forever", "-shared", "-nopw", "-quiet"], "x11vnc");
   service(stack, "websockify", ["--web", "/usr/share/novnc", `127.0.0.1:${NOVNC_PORT}`, `127.0.0.1:${VNC_PORT}`], "novnc");
   await waitFor(async () => (await fetch(`http://127.0.0.1:${NOVNC_PORT}/vnc.html`, { signal: AbortSignal.timeout(2_000) })).ok, "viewer");
