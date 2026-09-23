@@ -1,4 +1,4 @@
-import { InferenceProviderDetailScreen } from "../../../../_components/inference-provider-detail-screen";
+import { InferenceProviderEditorScreen } from "../../../../_components/inference-provider-editor-screen";
 
 export default async function AiGatewayProviderPage({
   params,
@@ -6,5 +6,5 @@ export default async function AiGatewayProviderPage({
   params: Promise<{ inferenceProviderId: string }>;
 }) {
   const { inferenceProviderId } = await params;
-  return <InferenceProviderDetailScreen key={inferenceProviderId} inferenceProviderId={inferenceProviderId} embedded />;
+  return <InferenceProviderEditorScreen key={inferenceProviderId} inferenceProviderId={inferenceProviderId} embedded />;
 }

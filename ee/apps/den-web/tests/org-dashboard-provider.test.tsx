@@ -509,7 +509,7 @@ async function gatewayPage(pathname: string) {
   const params = Promise.resolve({ inferenceProviderId: "infp_1" });
   const page = pathname.endsWith("/edit") ? await EditGatewayProviderPage({ params })
     : pathname.endsWith("/infp_1") ? await GatewayProviderPage({ params })
-    : <NewGatewayProviderPage />;
+    : await NewGatewayProviderPage({ searchParams: Promise.resolve({}) });
   return <AdminDashboardLayout><AiGatewayProvidersLayout>{page}</AiGatewayProvidersLayout></AdminDashboardLayout>;
 }
 
