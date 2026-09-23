@@ -1,5 +1,5 @@
 import { expect } from "vitest";
-import { spec } from "@openwork/testkit";
+import { eventually, spec } from "@openwork/testkit";
 import { connectorCatalogManagement, isRecord, records } from "../worlds/library.ts";
 
 const test = spec.world(connectorCatalogManagement, { timeout: 600_000 });
@@ -113,7 +113,14 @@ test("Den catalog shows its full inventory, preserves service identity, and keep
     await admin.type({ placeholder: "00000000-0000-0000-0000-000000000000", nth: 1 }, "22222222-2222-4222-8222-222222222222");
     await admin.type({ placeholder: "Paste the secret value, not its ID" }, "catalog-microsoft-test-secret");
     await admin.click({ testId: "save-microsoft-365" });
-    await admin.notSee({ testId: "microsoft-365-dialog" });
+    await eventually(async () => {
+      const client = await probe.api(world.den.admin, "/v1/oauth-providers/microsoft-365/client");
+      return isRecord(client.body) && client.body.configured === true;
+    }, { within: 30_000, label: "Microsoft 365 setup to save" });
+    await eventually(async () => {
+      await admin.notSee({ testId: "microsoft-365-dialog" }, { timeoutMs: 500 });
+      return true;
+    }, { within: 10_000, label: "the Microsoft 365 dialog to close" });
     await admin.reload();
     await admin.see({ testId: "connector-catalog-count" }, { timeoutMs: 90_000 });
     await admin.type({ testId: "connector-smart-bar" }, "", { replace: true });
@@ -134,6 +141,7 @@ test("Den catalog shows its full inventory, preserves service identity, and keep
         { id, connectedForMe: false, connected: true, credentialMode: "per_member" },
       ]);
       await admin.navigate(`${catalogUrl}/${id}`);
+      await admin.see({ testId: "connector-detail-title" }, { timeoutMs: 60_000 });
       await admin.reload();
       await admin.see({ testId: "connector-detail-state" }, { text: "Needs your account" });
       await admin.see({ role: "link", label: "Connect your account" });
@@ -173,6 +181,23 @@ test("Den catalog shows its full inventory, preserves service identity, and keep
     await admin.notSee({ testId: "edit-mcp-connection-dialog" });
     expect((await probe.api(world.den.admin, "/v1/mcp-connections?scope=manageable")).body).toEqual(adminState.body);
     await admin.screenshot();
+  });
+
+  await step("the configured list keeps each row to its name, state and one menu", async () => {
+    await admin.navigate(`${catalogUrl}/configured`);
+    await admin.see({ testId: `mcp-connection-row-${world.connection.id}` }, { text: /Catalog Notes/, timeoutMs: 60_000 });
+    await admin.notSee({ text: /^Issuer: / });
+    await admin.notSee({ role: "button", label: "Disconnect Catalog Notes" });
+    await admin.click({ testId: `mcp-connection-more-${world.connection.id}` });
+    await admin.see({ testId: `edit-mcp-connection-${world.connection.id}` });
+    await admin.see({ testId: `test-mcp-tools-${world.connection.id}` });
+    await admin.see({ role: "menuitem", label: "Disconnect Catalog Notes" });
+    await admin.notSee({ role: "menuitem", text: "Chat" });
+    const row = await catalog.dom(`[data-testid="mcp-connection-row-${world.connection.id}"]`);
+    expect(JSON.stringify(row)).not.toContain("Chat with");
+    await admin.screenshot();
+    await admin.click({ testId: `mcp-connection-more-${world.connection.id}` });
+    await admin.notSee({ role: "menuitem", label: "Disconnect Catalog Notes" });
   });
 
   await step("OAuth startup rejection offers recovery without a success notice", async () => {
