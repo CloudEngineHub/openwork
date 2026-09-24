@@ -35,9 +35,15 @@ export async function findSnapshot(sha: string, api = client(), world: PreviewWo
   catch (error) { if (isMissing(error)) return null; throw error; }
 }
 
+/** Freestyle reports a null status when it killed the command at `timeoutMs`; the guest may have finished its work. */
+export function guestCommandOutcome(statusCode: number | null | undefined, timeoutMs: number): string {
+  return typeof statusCode === "number" ? `exit ${statusCode}` : `killed at ${Math.round(timeoutMs / 1000)}s timeout`;
+}
+
 export async function execChecked(vm: Vm, command: string, timeoutMs = 120_000): Promise<string> {
   const result = await vm.exec({ command, timeoutMs, linuxUser: "root" });
-  if (result.statusCode !== 0) throw new Error(`Freestyle guest command failed (${result.statusCode}). Inspect the builder's private logs.`);
+  // Keep this prefix: the review app logs only messages that start with it.
+  if (result.statusCode !== 0) throw new Error(`Freestyle guest command failed (${guestCommandOutcome(result.statusCode, timeoutMs)}).`);
   return result.stdout ?? "";
 }
 
@@ -88,6 +94,36 @@ export async function waitForPublicAccess(url: string, probe: typeof fetch = fet
     if (attempt < 7) await pause(250);
   }
   throw new Error(`Public sandbox readiness failed (HTTP ${status || "unreachable"}).`);
+}
+
+/**
+ * Each advertised service hostname is a new edge route to this VM. A soak saw the
+ * first Den API call 502 seconds after launch while the app hostname already
+ * answered, so hand out no link before the gateway's own handshake answers on it.
+ */
+export async function waitForServiceRoutes(
+  origins: Record<string, string>, token: string, probe: typeof fetch = fetch,
+  pause: (ms: number) => Promise<unknown> = delay, deadlineMs = 20_000,
+): Promise<void> {
+  await Promise.all(Object.entries(origins).map(async ([service, origin]) => {
+    const deadline = Date.now() + deadlineMs;
+    let status = 0;
+    for (let attempt = 0; Date.now() < deadline; attempt++) {
+      try {
+        const response = await probe(`${origin}/__openwork_launch?token=${token}`, { redirect: "manual", signal: AbortSignal.timeout(3_000) });
+        status = response.status;
+        const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
+        await response.body?.cancel();
+        if (status === 303 && cookie?.startsWith("__Host-openwork-preview=")) return;
+        if (![404, 408, 425, 429].includes(status) && status < 500) break;
+      } catch (error) {
+        if (!(error instanceof TypeError) && !(error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name))) throw error;
+      }
+      await pause(Math.min(1_000, 250 * (attempt + 1)));
+    }
+    // Keep this prefix: the review app logs only messages that start with it.
+    throw new Error(`Public sandbox readiness failed (HTTP ${status || "unreachable"}) for ${service}.`);
+  }));
 }
 
 /** Every call creates a VM. Neither reports nor visitors ever key a reusable VM. */
@@ -168,6 +204,12 @@ export async function launchPreview(
     }
     stage = "public-access";
     await waitForPublicAccess(url, probe, delay, world);
+    if (world === "acme-web" && origins) {
+      stage = "service-routes";
+      // The app hostname was checked above; every other linked service must route too.
+      const linked = Object.fromEntries(Object.entries(origins).filter(([service]) => service !== "app" && (service !== "desktop" || outputs.desktopUrl)));
+      await waitForServiceRoutes(linked, token, probe);
+    }
     return { id: vmId, snapshotId: snapshot.id, gitSha: input.gitSha, url, expiresAt, world, outputs };
   } catch (error) {
     await vm.delete().catch(() => undefined); // Provider TTL still bounds failed cleanup.
