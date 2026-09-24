@@ -36,8 +36,7 @@ import { buildEngineAuthProbeHeader } from "./engine-registry.js";
 import { addPlugin, listPlugins, normalizePluginSpec, removePlugin } from "./plugins.js";
 import { sanitizePortableOpencodeConfig } from "./portable-opencode.js";
 import { addMcp, listMcp, removeMcp, setMcpEnabled } from "./mcp.js";
-import { buildOpenWorkV2Instructions, waitForOpenWorkV2Skills, OPENWORK_V2_INSTRUCTION_KEY } from "./opencode-v2-instructions.js";
-import { CLOUD_NATIVE_SKILL_ID_PREFIX, CloudNativeSkillSyncError } from "./cloud-native-skills.js";
+import { buildOpenWorkV2Instructions, OPENWORK_V2_INSTRUCTION_KEY } from "./opencode-v2-instructions.js";
 import {
   callMcpAppTool,
   listMcpAppCatalog,
@@ -658,6 +657,7 @@ async function assertWorkspaceOwnsProxiedSessionRead(
         realpath(sessionDirectory).catch(() => sessionDirectory),
       ])
     : [directory, sessionDirectory];
+  signal?.throwIfAborted();
   if (!actualDirectory || actualDirectory !== expectedDirectory) {
     throw new ApiError(404, "session_not_found", "Session not found");
   }
@@ -796,16 +796,20 @@ export async function startServer(
     logger,
   });
   setEngineInstanceReaperForConfig(config, engineInstanceReaper);
+  const engineV2Preview = createEngineV2Preview({ config, env, deferStart: true });
   const cloudProviderSync = new CloudProviderSync({
     config,
     env,
-    reloadEngine: () => reloadOpencodeEngine(
-      config,
-      resolveEngineRuntimeWorkspace(config),
-      engineMcpServerState,
-      { forceStandby: true, reason: "cloud_provider_sync" },
-    ),
+    reloadEngine: async () => {
+      if (engineV2Preview.status().chatRouting) {
+        await engineV2Preview.refreshProviders();
+        return { action: "updated_live" };
+      }
+      return reloadOpencodeEngine(config, resolveEngineRuntimeWorkspace(config), engineMcpServerState,
+        { forceStandby: true, reason: "cloud_provider_sync" });
+    },
     engineBusy: () => {
+      if (engineV2Preview.status().chatRouting) return Promise.resolve(false);
       const pool = enginePoolForConfig(config);
       return pool
         ? Promise.resolve(pool.hasDrainingGeneration())
@@ -819,7 +823,6 @@ export async function startServer(
     // workspace has no engine to reload.
     if (config.workspaces.length > 0 || enginePoolForConfig(config)) cloudProviderSync.markReloadPending();
   };
-  const engineV2Preview = createEngineV2Preview({ config, env, deferStart: true });
   const routes = createRoutes(
     config,
     approvals,
@@ -904,13 +907,20 @@ export async function startServer(
           await managedDesktopPolicy(config).assertRequest(request, mount.restPath, true);
           const workspace = await resolveWorkspaceWithoutBootstrap(config, mount.workspaceId);
           const ownership = assertWorkspaceOwnsProxiedSessionRead(config, workspace, request.method, mount.restPath, false,
-            request.method === "GET" ? request.signal : undefined);
+            request.method === "GET" || request.method === "HEAD" ? request.signal : undefined);
           proxyService = "opencode";
           proxyBaseUrl = workspace.baseUrl?.trim() || undefined;
           const send = () => proxyOpencodeRequest({ config, request, url, workspace, proxyPath: mount.restPath,
             recoverySignal: taskRecovery?.owns(request) ? request.signal : undefined });
           const response = await sendWithOwnershipProof(ownership,
             () => taskRecovery ? taskRecovery.forward(workspace, "v1", mount.restPath, request, send) : send());
+          if (response.ok && workspace.workspaceType !== "remote" && engineV2Preview.status().chatRouting
+            && ["PUT", "DELETE"].includes(request.method)
+            && /^\/opencode\/auth\/[^/]+$/.test(mount.restPath)) {
+            // The ordinary local-provider form writes v1's credential store.
+            // Join v2 catalog reconciliation before reporting that save complete.
+            await engineV2Preview.refreshProviders();
+          }
           return finalizeProxyResponse(response);
         } catch (error) {
           const requestCanceled = isExpectedRequestCancellation(error, request.signal);
@@ -958,7 +968,7 @@ export async function startServer(
             workspace,
             proxyPath: mount.restPath,
             connection,
-            syncCloudSkills: engineV2Preview.syncCloudSkills,
+            syncWorkspaceSkills: engineV2Preview.syncWorkspaceSkills,
             actor,
             recoverySignal: taskRecovery?.owns(request) ? request.signal : undefined,
           });
@@ -1028,7 +1038,7 @@ export async function startServer(
           const workspace = config.workspaces[0];
           const ownership = workspace
             ? assertWorkspaceOwnsProxiedSessionRead(config, workspace, request.method, url.pathname, false,
-              request.method === "GET" ? request.signal : undefined)
+              request.method === "GET" || request.method === "HEAD" ? request.signal : undefined)
             : Promise.resolve();
           const send = () => proxyOpencodeRequest({ config, request, url, workspace });
           const response = await sendWithOwnershipProof(ownership,
@@ -1226,14 +1236,15 @@ export async function proxyOpencodeV2Request(input: {
   workspace: WorkspaceInfo;
   proxyPath: string;
   connection: { url: string; username: string; password: string };
-  syncCloudSkills: EngineV2Preview["syncCloudSkills"];
+  syncWorkspaceSkills: EngineV2Preview["syncWorkspaceSkills"];
   recoverySignal?: AbortSignal;
 }): Promise<Response> {
   const method = input.request.method.toUpperCase();
-  const signal = method === "GET"
+  const readRequest = method === "GET" || method === "HEAD";
+  const signal = readRequest
     ? input.recoverySignal ? AbortSignal.any([input.request.signal, input.recoverySignal]) : input.request.signal
     : input.recoverySignal;
-  if (method === "GET") signal?.throwIfAborted();
+  if (readRequest) signal?.throwIfAborted();
   if (method !== "GET" && method !== "HEAD") ensureWritable(input.config);
 
   const withoutPrefix = input.proxyPath.slice("/opencode2".length);
@@ -1313,28 +1324,9 @@ export async function proxyOpencodeV2Request(input: {
     const mcpPayload: unknown = mcpResponse.ok ? await mcpResponse.json() : null;
     const connectReady = isRecord(mcpPayload) && Array.isArray(mcpPayload.data) && mcpPayload.data.some((entry) =>
       isRecord(entry) && entry.name === "openwork-cloud" && isRecord(entry.status) && entry.status.status === "connected");
-    // Authorized organization skills are materialized fresh as native skills
-    // on every admission. Skills fail closed, the conversation does not: any
-    // Cloud auth/transport failure has already cleared and unregistered the
-    // materialized root, so the prompt is admitted without Cloud skills and the
-    // waiter below confirms none remain in the native registry.
-    let cloudSkills: Awaited<ReturnType<EngineV2Preview["syncCloudSkills"]>>;
-    try {
-      cloudSkills = await input.syncCloudSkills();
-    } catch (error) {
-      if (error instanceof CloudNativeSkillSyncError) throw new ApiError(502, error.code, error.message);
-      throw new ApiError(502, "cloud_skill_sync_failed", "OpenWork Cloud skills could not be synchronized");
-    }
-    if (cloudSkills.failure) {
-      console.warn(`[openwork-server] Cloud skills unavailable for this turn (${cloudSkills.failure}); admitting without Cloud skills`);
-    }
-    const skillUrl = new URL(target);
-    skillUrl.pathname = "/api/skill";
-    await waitForOpenWorkV2Skills(input.workspace.path, async () => {
-      const response = await loopbackFetch(skillUrl.toString(), { headers: internalHeaders, signal: AbortSignal.timeout(5_000) });
-      if (!response.ok) throw new ApiError(502, "engine_skill_sync_failed", "Native skills are unavailable");
-      return response.json();
-    }, cloudSkills);
+    // Keep organization skill discovery on demand through Connect. The full
+    // catalog can exceed the engine's instruction-entry request limit.
+    await input.syncWorkspaceSkills(input.workspace.path);
     const value = buildOpenWorkV2Instructions(connectReady);
     const instructionUrl = new URL(target);
     instructionUrl.pathname = `/api/session/${encodeURIComponent(sessionId)}/instructions/entries/${OPENWORK_V2_INSTRUCTION_KEY}`;
@@ -1376,7 +1368,7 @@ export async function proxyOpencodeV2Request(input: {
       if (!isRecord(value) || typeof value.id !== "string") {
         throw new ApiError(502, "invalid_engine_response", "Invalid skill metadata");
       }
-      if (!value.id.startsWith(CLOUD_NATIVE_SKILL_ID_PREFIX)) return value;
+      if (!value.id.startsWith("openwork-cloud-")) return value;
       return Object.fromEntries(Object.entries(value).filter(([key]) => ["id", "name", "description", "slash"].includes(key)));
     };
     return jsonResponse({ data: Array.isArray(raw) ? raw.map(publicSkill) : publicSkill(raw) });
@@ -1630,10 +1622,11 @@ export async function proxyOpencodeRequest(input: {
   const workspace = input.workspace;
   const proxyPath = input.proxyPath ?? input.url.pathname;
   const method = input.request.method.toUpperCase();
-  const signal = method === "GET"
+  const readRequest = method === "GET" || method === "HEAD";
+  const signal = readRequest
     ? input.recoverySignal ? AbortSignal.any([input.request.signal, input.recoverySignal]) : input.request.signal
     : input.recoverySignal;
-  if (method === "GET") signal?.throwIfAborted();
+  if (readRequest) signal?.throwIfAborted();
   // The wrapper routes enforced the server read-only mode via ensureWritable;
   // native proxy writes must honor the same guard so a read-only server never
   // forwards mutations to the engine.
@@ -1758,7 +1751,7 @@ export async function proxyOpencodeRequest(input: {
       response = await loopbackFetch(targetUrl, { method, headers, body, signal });
       enginePoolForConfig(input.config)?.reportRequestSuccess(baseUrl);
     } catch (error) {
-      if (method === "GET" && isExpectedRequestCancellation(error, signal)) throw error;
+      if (readRequest && isExpectedRequestCancellation(error, signal)) throw error;
       if (workspace) enginePoolForConfig(input.config)?.reportRequestFailure(baseUrl, error, workspace);
       if (isEngineConnectionFailure(error)) throw opencodeUnreachableError(error, proxyPath);
       throw error;
@@ -1773,7 +1766,7 @@ export async function proxyOpencodeRequest(input: {
           { method, headers: fallbackHeaders, body, signal },
         );
       } catch (error) {
-        if (method === "GET" && isExpectedRequestCancellation(error, signal)) throw error;
+        if (readRequest && isExpectedRequestCancellation(error, signal)) throw error;
         if (workspace) enginePoolForConfig(input.config)?.reportRequestFailure(route.fallback.baseUrl, error, workspace);
         if (isEngineConnectionFailure(error)) throw opencodeUnreachableError(error, proxyPath);
         throw error;

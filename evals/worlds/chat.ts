@@ -2734,6 +2734,9 @@ export async function skillLifecycle(seed: Seed) {
       } } } : {}),
     }, "v2");
     const session = await seedSessionRetry(seed, app, { title: "Release report" });
+    // OAuth leaves the native app behind the browser on macOS. CDP keyboard
+    // input needs renderer focus even when this isolated test window is hidden.
+    await app.client.send("Emulation.setFocusEmulationEnabled", { enabled: true });
     const skillName = "release-briefing";
     return {
       app, den, workspace, session, skillName, live, modelId,
@@ -2753,6 +2756,17 @@ export async function skillLifecycle(seed: Seed) {
        * provider and model, never from an organization model that replaced it.
        * Only a live provider reports token usage; the fixture model streams none.
        */
+      async conversationState() {
+        const result = await request(`/workspace/${workspace.workspaceId}/opencode2/api/session/${session.sessionId}/message`);
+        const messages = isRecord(result.json) && Array.isArray(result.json.data) ? result.json.data.filter(isRecord) : [];
+        return {
+          users: messages.filter(message => message.type === "user").map(message => {
+            if (typeof message.text !== "string") throw new Error("Native user message is missing its text");
+            return message.text;
+          }),
+          completed: messages.filter(message => message.type === "assistant" && message.finish === "stop").map(message => message.id),
+        };
+      },
       async usedConfiguredModel() {
         const result = await request(`/workspace/${workspace.workspaceId}/opencode2/api/session/${session.sessionId}/message`);
         const messages = isRecord(result.json) && Array.isArray(result.json.data) ? result.json.data.filter(isRecord) : [];
