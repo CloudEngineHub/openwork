@@ -1,6 +1,6 @@
 import { migrateOpencodeV1History, opencodeV1DatabasePath, type EngineV2MigrationStatus } from "./opencode-v2-migration.js";
-import { waitForOpenWorkV2Skills } from "./opencode-v2-instructions.js";
 import { executionRules } from "./managed-policy-rules.js";
+import { waitForEngineSkillChanges } from "./opencode-v2-skill-settle.js";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -68,8 +68,8 @@ export interface EngineV2Preview {
   ensureWorkspaceReady(directory: string): Promise<void>;
   refreshProviders(): Promise<void>;
   syncWorkspaceMcp(workspaceId: string, directory: string): Promise<void>;
-  /** Join the native watcher for local workspace skills only. */
-  syncWorkspaceSkills(directory: string): Promise<void>;
+  /** After OpenWork writes workspace skills, briefly wait for the engine to reflect them. Never throws. */
+  settleWorkspaceSkills(directory: string): Promise<void>;
   migrateHistory(): EngineV2PreviewStatus;
   stop(): Promise<void>;
 }
@@ -335,12 +335,12 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
   const workspaceMcp = new Map<string, Map<string, string>>();
   const mcpInFlight = new Map<string, Promise<void>>();
   const mcpWorkspaces = new Map<string, string>();
-  async function syncWorkspaceSkills(directory: string): Promise<void> {
+  async function settleWorkspaceSkills(directory: string): Promise<void> {
     const active = sidecar;
-    if (!active) throw new Error("OpenCode v2 is not running");
-    await waitForOpenWorkV2Skills(directory, async () => {
+    if (!active || !chatRouting) return;
+    await waitForEngineSkillChanges(directory, async () => {
       const response = await active.fetchJson("/api/skill", { directory, timeoutMs: 5_000 });
-      if (response.status !== 200) throw new Error("Native workspace skills are unavailable");
+      if (response.status !== 200) throw new Error(`HTTP ${response.status}`);
       return response.json;
     });
   }
@@ -689,5 +689,5 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
     if (enabled) void start().catch(recordStartError);
   }
   if (!options.deferStart) startWhenReady();
-  return { start: startWhenReady, migrateHistory, status, setEnabled, setChatRouting, connection, ensureWorkspaceReady, refreshProviders, syncWorkspaceMcp, syncWorkspaceSkills, stop };
+  return { start: startWhenReady, migrateHistory, status, setEnabled, setChatRouting, connection, ensureWorkspaceReady, refreshProviders, syncWorkspaceMcp, settleWorkspaceSkills, stop };
 }

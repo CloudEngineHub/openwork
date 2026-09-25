@@ -970,7 +970,6 @@ export async function startServer(
             workspace,
             proxyPath: mount.restPath,
             connection,
-            syncWorkspaceSkills: engineV2Preview.syncWorkspaceSkills,
             prepareSessionDirectory: async (directory) => {
               await engineV2Preview.ensureWorkspaceReady(directory);
               await engineV2Preview.syncWorkspaceMcp(workspace.id, directory);
@@ -1242,7 +1241,6 @@ export async function proxyOpencodeV2Request(input: {
   workspace: WorkspaceInfo;
   proxyPath: string;
   connection: { url: string; username: string; password: string };
-  syncWorkspaceSkills: EngineV2Preview["syncWorkspaceSkills"];
   prepareSessionDirectory?: (directory: string) => Promise<void>;
   recoverySignal?: AbortSignal;
 }): Promise<Response> {
@@ -1326,7 +1324,6 @@ export async function proxyOpencodeV2Request(input: {
       isRecord(entry) && entry.name === "openwork-cloud" && isRecord(entry.status) && entry.status.status === "connected");
     // Keep organization skill discovery on demand through Connect. The full
     // catalog can exceed the engine's instruction-entry request limit.
-    await input.syncWorkspaceSkills(executionDirectory);
     const value = buildOpenWorkV2Instructions(connectReady);
     const instructionUrl = new URL(target);
     instructionUrl.pathname = `/api/session/${encodeURIComponent(sessionId)}/instructions/entries/${OPENWORK_V2_INSTRUCTION_KEY}`;
@@ -2789,6 +2786,9 @@ function createRoutes(
         action: "added",
       });
     }
+    if (imported.files.some((file) => file.objectType === "skill") && workspace.workspaceType !== "remote") {
+      await engineV2Preview.settleWorkspaceSkills(workspace.path);
+    }
 
     // Hot-register any bundled MCP servers with the running engine.
     await syncRuntimeMcpToOpencodeEngine(
@@ -2854,6 +2854,9 @@ function createRoutes(
         action: "added",
       });
     }
+    if (imported.files.some((file) => file.objectType === "skill") && workspace.workspaceType !== "remote") {
+      await engineV2Preview.settleWorkspaceSkills(workspace.path);
+    }
 
     // Hot-register any bundled MCP servers with the running engine.
     await syncRuntimeMcpToOpencodeEngine(
@@ -2903,6 +2906,9 @@ function createRoutes(
         name: file.title,
         action: "removed",
       });
+    }
+    if (removed.files.some((file) => file.objectType === "skill") && workspace.workspaceType !== "remote") {
+      await engineV2Preview.settleWorkspaceSkills(workspace.path);
     }
 
     return jsonResponse({ item: removed, warnings: [] });
@@ -3663,6 +3669,9 @@ function createRoutes(
       action: result.action,
       path: result.path,
     });
+    // The next v2 turn should see a skill OpenWork just wrote; the engine's
+    // own watcher normally catches up within ~200 ms.
+    if (workspace.workspaceType !== "remote") await engineV2Preview.settleWorkspaceSkills(workspace.path);
     return jsonResponse({ name, path: result.path, description: description ?? "", scope: "project" });
   });
 
@@ -3696,6 +3705,7 @@ function createRoutes(
       action: "removed",
       path: result.path,
     });
+    if (workspace.workspaceType !== "remote") await engineV2Preview.settleWorkspaceSkills(workspace.path);
     return jsonResponse({ ok: true, name, path: result.path });
   });
 
