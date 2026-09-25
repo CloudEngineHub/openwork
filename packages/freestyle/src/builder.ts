@@ -25,7 +25,7 @@ export interface BuildOptions {
   diagnostic?: (stage: string, log: string) => Promise<void>;
 }
 
-async function runScript(vm: Vm, stage: string, script: string, options: BuildOptions) {
+export async function runScript(vm: Vm, stage: string, script: string, options: BuildOptions) {
   const root = `/opt/openwork-preview/${stage}`;
   await execChecked(vm, "mkdir -p /opt/openwork-preview");
   await vm.fs.writeTextFile(`${root}.sh`, `#!/bin/bash
@@ -47,7 +47,8 @@ touch ${root}.ready
     if (state === "ready") return;
     if (state === "failed") {
       if (options.diagnostic) {
-        const runtime = stage === "world" ? await execChecked(vm, "journalctl -u openwork-preview-runtime --no-pager -n 100") : "";
+        const runtime = stage === "world" ? await execChecked(vm, "journalctl -u openwork-preview-runtime --no-pager -n 100")
+          : stage === "evidence-world" ? await execChecked(vm, "journalctl -u openwork-evidence --no-pager -n 100") : "";
         await options.diagnostic(stage, await vm.fs.readTextFile(`${root}.log`) + runtime);
       }
       throw new Error(`Snapshot ${stage} failed. Private builder log: ${root}.log`);

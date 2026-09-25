@@ -52,6 +52,45 @@ Windows accepts `--lifetime 0-1410` (0 until stopped), reserving 30 minutes
 for a VM provider TTL after startup. The installer resolves the exact `v<x.y.z>` GitHub release asset and verifies
 its API-published SHA-256 digest inside the VM before installation.
 
+## Saved web evidence checkpoints
+
+Use the PR's **OpenWork Checkpoints** check to open its branch-specific report.
+Pictures with a saved world offer **Open from here** below the image and in its
+viewer, then **Enter saved browser**. Both places share the same copy; **New copy**
+restores the original checkpoint again without reloading the report. App shots
+inside verification forks are checkpointed too. Review UI, noVNC-client images,
+and explicit opt-outs are marked screenshot-only. This creates an independent private VM;
+it never resumes or changes the original test VM. The captured Chromium tab is
+shown through noVNC. A held mock response offers **Continue response**. Do not
+promise restoration of a live connection to an external model provider.
+
+To run the opt-in proof from the requested branch:
+
+```sh
+pnpm --filter @openwork/review-app build
+pnpm evals:e2e web-checkpoint-fork --local --engine v1 --surface web --checkpoints
+```
+
+`--local` places the test controller and review browser locally (Blacksmith in
+CI); the explicit evidence world runs wholly on Freestyle. The host needs
+`FREESTYLE_API_KEY`; it must never enter the VM or an evidence artifact. Ordinary
+proofs are unchanged. This does not require an Infisical integration.
+
+To inspect a new web world rather than a captured step, use the merged world
+source vocabulary; all components use that one pushed commit:
+
+```sh
+pnpm world up evidence-web --place freestyle --stage pr-1234 --source app-web=sha:<full-pushed-sha>
+pnpm world outputs evidence-web --stage pr-1234 --reveal
+pnpm world down evidence-web --stage pr-1234
+```
+
+Do not substitute that fresh world for a checkpoint. Checkpoints expire after
+24 hours; forks last one hour, with three simultaneous copies per checkpoint.
+Keep access links private. Cold preparation and snapshot materialization can
+still take minutes. The PR proof publishes a separate protected review preview
+from its own head, without updating the shared reviewer or requiring a merge.
+
 ## Start and open
 
 For the configurable app-web script, use a reviewed full pushed SHA on Daytona:
