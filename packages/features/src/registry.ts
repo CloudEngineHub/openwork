@@ -613,6 +613,17 @@ export const FEATURES = defineFeatures({
     deployments: everywhere,
     default: false,
   },
+  customConnectorSetup: {
+    label: "Connect: revised custom connector setup",
+    description: "Revised custom MCP setup: live server checks, reviewed permissions and manual sign-in addresses, copyable callback, persistent app credentials, and a direct connection-to-sharing flow. Tool Tester shows meaningful results before raw metadata. Turning it off restores the existing setup and result display; saved connections keep working.",
+    category: "connect",
+    added: "2026-10-28",
+    since: "2026-10",
+    author: "benjaminshafii",
+    docs: "docs/features/custom-connector-setup/README.md",
+    deployments: everywhere,
+    default: false,
+  },
   expandedMcpPresets: {
     label: "Connect: more MCP server presets",
     description: "Admins see more reviewed official MCP servers (Airtable, Amplitude, Canva, Fireflies, Hugging Face, Lucid, Mural, Vercel, PostHog, monday.com, Honeycomb, Klaviyo, Semgrep, Cal.com, Tavily, Figma) to add with one click in Manage › Connectors. Each uses the same OAuth or API-key flow as the existing presets. Turning it off hides the new suggestions; existing connections stay.",
