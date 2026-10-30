@@ -17,6 +17,7 @@ import { and, eq, isNull } from "@openwork-ee/den-db/drizzle"
 import { ConfigObjectTable, MemberTable, OrganizationTable } from "@openwork-ee/den-db/schema"
 import { normalizeDenTypeId } from "@openwork-ee/utils/typeid"
 import {
+  MCP_APP_INITIAL_RESULTS_META,
   MCP_APP_LAUNCH_TOOL_NAME,
   mcpAppIdSchema,
   parseMcpAppResourceUri,
@@ -36,13 +37,14 @@ import {
 } from "../mcp-apps.js"
 import { executeCapabilityWithBudget } from "./agent.js"
 import { runsWithoutClick } from "./app-tool-access.js"
+import { loadInitialResults, requiredScope } from "./app-launch-data.js"
 import { callMcpAppTool } from "./app-tools.js"
 import { mcpAuditPrincipal } from "../audit/mcp-service-audit.js"
 import { mcpPrincipalCredentialId, type McpPrincipal } from "./auth.js"
 import { createCapabilityRegistryContext, type ExecuteCapabilityToolResult } from "./capability-registry.js"
 import { resolveMcpMemberIdentity } from "./external-capabilities.js"
 import { getCatalog } from "./index.js"
-import { DEN_MCP_READ_SCOPE, DEN_MCP_WRITE_SCOPE } from "./scopes.js"
+import { DEN_MCP_READ_SCOPE } from "./scopes.js"
 
 /** App servers share the connection endpoint path; their ids are App config objects. */
 export function isMcpAppServerId(value: string): boolean {
@@ -55,7 +57,11 @@ const launchInputSchema: Tool["inputSchema"] = {
     input: {
       type: "object",
       additionalProperties: true,
-      description: "Optional JSON launch input the App receives. Opening runs no other tools.",
+      description: "Optional JSON launch input the App receives.",
+    },
+    timeZone: {
+      type: "string",
+      description: "Optional IANA time zone for the data the App loads as it opens.",
     },
   },
   additionalProperties: false,
@@ -73,7 +79,7 @@ function launchTool(definition: McpAppServerDefinition): Tool {
   return {
     name: MCP_APP_LAUNCH_TOOL_NAME,
     title: `Open ${app.title}`,
-    description: `Open ${app.title}.${app.description ? ` ${app.description}` : ""} Returns its launch input and a readable summary; opening runs no other tools.`,
+    description: `Open ${app.title}.${app.description ? ` ${app.description}` : ""} Returns its launch input and a readable summary${definition.loadsWithLaunch ? "; opening also loads the App's read-only data" : "; opening runs no other tools"}.`,
     inputSchema: launchInputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     _meta: { ui: { resourceUri: app.resourceUri, visibility: ["model", "app"] }, "ui/resourceUri": app.resourceUri },
@@ -95,11 +101,6 @@ function boundTool(binding: McpAppToolBinding): Tool {
     },
     _meta: { ui: { visibility: ["model", "app"] } },
   }
-}
-
-/** A connection tool always needs mcp:write, whatever its label, because external dispatch requires it. */
-function requiredScope(binding: McpAppToolBinding): string {
-  return binding.readOnly && binding.kind !== "mcp" ? DEN_MCP_READ_SCOPE : DEN_MCP_WRITE_SCOPE
 }
 
 type AppRefusal = "not_a_member" | "other_organization" | "apps_off" | "not_found"
@@ -187,9 +188,17 @@ export function createMcpAppServer(input: {
     const args = toolArguments(request.params.arguments)
     if (request.params.name === MCP_APP_LAUNCH_TOOL_NAME) {
       if (!input.scopes.has(DEN_MCP_READ_SCOPE)) return scopeError(MCP_APP_LAUNCH_TOOL_NAME, DEN_MCP_READ_SCOPE)
+      const launchInput = toolArguments(args.input)
+      // Launch input can change what the App asks for, so only an App opened
+      // without any gets reads made ahead of it. They stay out of the model's
+      // view in _meta, which hosts pass to the App with the result.
+      const initialResults = input.definition.loadsWithLaunch && Object.keys(launchInput).length === 0
+        ? await loadInitialResults({ tools, scopes: input.scopes, timeZone: typeof args.timeZone === "string" ? args.timeZone : undefined, callTool: input.callTool })
+        : []
       return {
         content: [{ type: "text", text: app.textFallback }],
-        structuredContent: { app, input: toolArguments(args.input) },
+        structuredContent: { app, input: launchInput },
+        ...(initialResults.length > 0 ? { _meta: { [MCP_APP_INITIAL_RESULTS_META]: initialResults } } : {}),
       }
     }
     const binding = tools.find((tool) => tool.name === request.params.name)
