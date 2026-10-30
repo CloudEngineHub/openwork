@@ -34,6 +34,7 @@ import { openDesktopUrl, revealDesktopItemInDir } from "@/app/lib/desktop"
 import { isElectronRuntime } from "@/app/lib/runtime-env"
 import { SYNTHETIC_SESSION_ERROR_MESSAGE_PREFIX } from "@/app/types"
 import { t } from "@/i18n"
+import { markFeatureUsed } from "@/app/lib/den"
 import { useOpenTargets } from "@/lib/target-provider"
 import { openTargetFromUrl } from "@/react-app/domains/session/artifacts/open-target"
 import { presentOpencodeSessionError, sessionErrorPresentationFromUIMessage } from "@/react-app/domains/session/sync/session-error"
@@ -46,6 +47,7 @@ import { OpenWorkModelsLimitCard } from "@/react-app/domains/cloud/usage-limit-c
 import type { OpenWorkModelsLimit } from "@/react-app/domains/cloud/usage-limit-state"
 import { rejectedRecoveryFromMessage } from "@/react-app/domains/session/sync/rejected-turn"
 import { replyModelLabel, replyModelProvider } from "@/react-app/domains/session/sync/reply-model"
+import { useLiveReplyModel } from "@/components/chat/live-reply-model-store"
 import { ProviderIcon } from "@/react-app/design-system/provider-icon"
 import { openAlternativeModelPicker } from "@/app/lib/inference-access"
 import { ApplyPatchTool } from "@/components/tools/apply-patch"
@@ -1206,9 +1208,13 @@ MessageComponent.displayName = "MessageComponent"
 const NO_BACKGROUND_SHELLS: BackgroundShell[] = []
 const NO_WAITS: WaitInterval[] = []
 
-const LoadingMessage = React.memo(({ elapsedSeconds, starting, backgroundShells = NO_BACKGROUND_SHELLS, backgroundStale = false }: {
+type WorkingModel = { label: string; providerId?: string }
+
+const LoadingMessage = React.memo(({ elapsedSeconds, starting, backgroundShells = NO_BACKGROUND_SHELLS, backgroundStale = false, model = null }: {
   elapsedSeconds: number
   starting: boolean
+  /** Feature `liveReplyModel`: the model writing this turn, shown on hover after the timer. */
+  model?: WorkingModel | null
   /** Commands left running in the background share this line while the turn runs. */
   backgroundShells?: BackgroundShell[]
   backgroundStale?: boolean
@@ -1221,7 +1227,7 @@ const LoadingMessage = React.memo(({ elapsedSeconds, starting, backgroundShells 
   ) : null
   return (
     <Message className="mx-auto flex w-full max-w-3xl flex-col items-start gap-2 px-2 md:px-10">
-      <div role={starting ? "status" : undefined} data-loading-message={starting ? "starting" : "working"} className="py-1 text-sm text-muted-foreground">
+      <div role={starting ? "status" : undefined} data-loading-message={starting ? "starting" : "working"} className="group/working py-1 text-sm text-muted-foreground">
         {/* One shimmer sweeps the whole line, so Working and the count move as
             one. A count the connection cannot confirm stays outside it, still. */}
         <span className="ow-text-shimmer tabular-nums">
@@ -1229,6 +1235,22 @@ const LoadingMessage = React.memo(({ elapsedSeconds, starting, backgroundShells 
           {backgroundStale ? null : background}
         </span>
         {backgroundStale ? background : null}
+        {/* Hover the Working line to see which model is writing this turn. It
+            sits right after the timer, outside the shimmer, on the same line. */}
+        {model ? (
+          <span
+            data-working-model=""
+            onMouseEnter={() => markFeatureUsed("liveReplyModel")}
+            className="opacity-0 transition-opacity duration-150 ease-out group-hover/working:opacity-100 pointer-coarse:opacity-100 motion-reduce:transition-none"
+          >
+            <span aria-hidden="true"> · </span>
+            <span className="sr-only">{t("session.reply_model_live_prefix")}</span>
+            <span className="inline-flex items-center gap-1 align-[-2px]">
+              {model.providerId ? <span aria-hidden="true" className="flex size-3 shrink-0 items-center justify-center"><ProviderIcon providerId={model.providerId} size={12} /></span> : null}
+              <span>{model.label}</span>
+            </span>
+          </span>
+        ) : null}
       </div>
     </Message>
   )
@@ -1944,7 +1966,18 @@ export function shouldShowRunReconnecting(status: ThreadStatus, syncDegraded: bo
 }
 
 export function MessageList({ messages, messageIdReplacements, status, activityStatus, retryStatus, syncHealth, viewport, sessionErrorHandled = false }: MessageListProps) {
-  const { workspaceId, sessionId, onStopSubagentSession } = useMessageList()
+  const { workspaceId, sessionId, onStopSubagentSession, resolveReplyModelTitle, autoRoutes, resolveAutoRouteName } = useMessageList()
+  const liveReplyModel = useLiveReplyModel()
+  // Only this turn's reply: before it starts there is no model to show, never the previous turn's.
+  const workingModel = React.useMemo<WorkingModel | null>(() => {
+    if (!liveReplyModel) return null
+    const lastUser = messages.findLastIndex((message) => message.role === "user")
+    const reply = messages.slice(lastUser + 1).findLast((message) => message.role === "assistant")
+    const label = reply ? replyModelLabel(reply, resolveReplyModelTitle, autoRoutes, resolveAutoRouteName) : null
+    if (!reply || !label) return null
+    const providerId = replyModelProvider(reply, autoRoutes)
+    return providerId ? { label, providerId } : { label }
+  }, [liveReplyModel, messages, resolveReplyModelTitle, autoRoutes, resolveAutoRouteName])
   const runningShells = useBackgroundShellStore((state) => state.booksByWorkspaceId[workspaceId]?.running)
   const backgroundShells = React.useMemo(
     () => sessionBackgroundShells(runningShells, sessionId),
@@ -2125,7 +2158,7 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
             runs, the count joins its Working line; otherwise it takes that
             line's place on its own. One line either way, so the chat does not
             move when the turn ends and the count stays. */}
-        {showLoading && !appPanelLive && <LoadingMessage elapsedSeconds={runElapsedSeconds} starting={status === "submitted"} backgroundShells={backgroundShells} backgroundStale={syncDegraded} />}
+        {showLoading && !appPanelLive && <LoadingMessage elapsedSeconds={runElapsedSeconds} starting={status === "submitted"} backgroundShells={backgroundShells} backgroundStale={syncDegraded} model={workingModel} />}
         {showReconnecting && <ReconnectingMessage lastConfirmedAt={syncHealth?.lastConfirmedAt ?? null} />}
         {!showLoading && backgroundShells.length > 0 && <BackgroundTasksMessage shells={backgroundShells} stale={syncDegraded} />}
         {retryStatus ? <RetryMessage status={retryStatus} /> : null}
