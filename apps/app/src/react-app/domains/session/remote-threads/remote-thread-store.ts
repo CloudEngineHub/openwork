@@ -69,10 +69,13 @@ type RemoteThreadState = {
   threadView: boolean
   /** `remoteSessionHelperView`: a row opens the task in the main pane, like a helper. */
   helperView: boolean
+  /** `remoteSessionAnswers`: the person answers a task's question or permission from here. */
+  answers: boolean
   threads: Record<string, RemoteThreadEntry>
   setEnabled: (enabled: boolean) => void
   setThreadView: (threadView: boolean) => void
   setHelperView: (helperView: boolean) => void
+  setAnswers: (answers: boolean) => void
   watch: (start: RemoteThreadStart, input: { owner: RemoteThreadOwner; organizationId: string; startedAt: number | null }) => () => void
   followedUp: (key: string) => void
   /** The agent sent the task a follow-up itself. */
@@ -98,6 +101,7 @@ export const useRemoteThreadStore = create<RemoteThreadState>()((set, get) => ({
   enabled: false,
   threadView: false,
   helperView: false,
+  answers: false,
   threads: {},
   setEnabled: (enabled) => {
     if (get().enabled === enabled) return
@@ -107,6 +111,7 @@ export const useRemoteThreadStore = create<RemoteThreadState>()((set, get) => ({
   },
   setThreadView: (threadView) => set({ threadView }),
   setHelperView: (helperView) => set({ helperView }),
+  setAnswers: (answers) => set({ answers }),
   watch: (start, input) => {
     const ownerKey = `${input.owner.workspaceId}:${input.owner.sessionId}`
     const now = Date.now()
@@ -319,6 +324,11 @@ async function follow() {
 
 export function useRemoteThreadsEnabled(): boolean {
   return useRemoteThreadStore((state) => state.enabled)
+}
+
+/** Whether a task's question or permission can be answered here instead of on its computer. */
+export function useRemoteThreadAnswersEnabled(): boolean {
+  return useRemoteThreadStore((state) => state.enabled && state.answers)
 }
 
 /** Whether a task's row opens its conversation; rows alone show progress. */

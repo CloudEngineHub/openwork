@@ -9,8 +9,12 @@ import { t } from "@/i18n"
 import { remoteToolCallStartedAt, type RemoteThreadStart } from "@/lib/remote-session-thread"
 import { cn } from "@/lib/utils"
 import { usePanelTabStore } from "@/react-app/domains/session/panel/panel-tab-store"
+import { RemoteThreadRowAnswers } from "@/react-app/domains/session/remote-threads/remote-thread-row-answers"
 import { stopRemoteThread } from "@/react-app/domains/session/remote-threads/remote-thread-actions"
-import { useFollowRemoteThread, useRemoteThread, useRemoteThreadHelperViewEnabled, useRemoteThreadViewEnabled } from "@/react-app/domains/session/remote-threads/remote-thread-store"
+import {
+  useFollowRemoteThread, useRemoteThread, useRemoteThreadAnswersEnabled, useRemoteThreadHelperViewEnabled, useRemoteThreadViewEnabled,
+} from "@/react-app/domains/session/remote-threads/remote-thread-store"
+import { rowQuestionOptions } from "@/lib/remote-session-answers"
 import { remoteThreadSentence, remoteThreadView, type RemoteThreadView } from "@/react-app/domains/session/remote-threads/remote-thread-view"
 import { useUiStateStore } from "@/react-app/shell/ui-state-store"
 
@@ -40,6 +44,7 @@ export function RemoteThreadRunLine({ start, part, className }: { start: RemoteT
   const entry = useRemoteThread(start.key)
   const threadView = useRemoteThreadViewEnabled()
   const helperView = useRemoteThreadHelperViewEnabled()
+  const answers = useRemoteThreadAnswersEnabled()
   const [stopping, setStopping] = useState(false)
   const [stoppedHere, setStoppedHere] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -57,16 +62,30 @@ export function RemoteThreadRunLine({ start, part, className }: { start: RemoteT
     }).finally(() => setStopping(false))
   } : null
 
+  // `remoteSessionAnswers`: a single-choice question's options sit under the
+  // row, whichever row style shows. Flag off, read-only, or nothing a row can
+  // answer: exactly the row as before.
+  const choices = answers && entry && !readOnly && view.waitingFor === "question" ? rowQuestionOptions(entry.status?.pending) : null
+  const withAnswers = (row: ReactNode, openTask: (() => void) | null) => {
+    if (!entry || !choices) return row
+    return (
+      <div className="flex min-w-0 max-w-full flex-col gap-1.5">
+        {row}
+        <RemoteThreadRowAnswers entry={entry} choices={choices} openPanel={openTask} />
+      </div>
+    )
+  }
+
   if (helperView) {
     // Opens like a local helper: in the main pane where it can be steered,
     // or beside the chat where this chat can't navigate (a split pane).
     const open = onOpenRemoteTask
       ? () => onOpenRemoteTask(start)
       : () => openRemoteThreadPanel(sessionId, workspaceId, start, view.title)
-    return <RemoteThreadSentenceRow start={start} view={view} className={className} open={open} stop={stop} stopping={stopping} />
+    return withAnswers(<RemoteThreadSentenceRow start={start} view={view} className={className} open={open} stop={stop} stopping={stopping} />, open)
   }
 
-  return (
+  return withAnswers((
     <div
       data-remote-thread={start.key}
       data-remote-thread-state={view.state}
@@ -101,7 +120,7 @@ export function RemoteThreadRunLine({ start, part, className }: { start: RemoteT
       {/* Stop just this task; the turn's own Stop stays in the composer. */}
       {stop ? <RemoteThreadStopButton title={view.title} stopping={stopping} onStop={stop} /> : null}
     </div>
-  )
+  ), threadView ? () => openRemoteThreadPanel(sessionId, workspaceId, start, view.title) : null)
 }
 
 function RemoteThreadStopButton({ title, stopping, onStop }: { title: string; stopping: boolean; onStop: () => void }) {

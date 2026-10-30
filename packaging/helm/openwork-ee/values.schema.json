@@ -441,6 +441,16 @@
               ],
               "description": "Desktop: open a task on another computer like a helper: Clicking a task on another computer opens it in the main pane like a helper: follow up with Enter, stop it, and press Esc to return to the chat where you left off. The chat row says what it ran last, and the sidebar lists the task under its chat. Needs the task conversation view. Renders DEN_FEATURE_REMOTE_SESSION_HELPER_VIEW."
             },
+            "remoteSessionAnswers": {
+              "enum": [
+                "",
+                "true",
+                "false",
+                true,
+                false
+              ],
+              "description": "Desktop: answer a sub-agent task's question here: When a task on the cloud or another computer asks a question or needs a permission, people answer it from its conversation beside the chat, or pick an option on its row, instead of going to that computer. Needs tasks on other computers as sub-agents. Renders DEN_FEATURE_REMOTE_SESSION_ANSWERS."
+            },
             "activationChecklist": {
               "enum": [
                 "",

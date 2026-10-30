@@ -6,6 +6,19 @@ export type Status = "running" | "waiting" | "idle" | "error"
 export type WaitingFor = "permission" | "question"
 export interface Model { providerId: string; modelId: string; variant?: string | null }
 export interface SessionError { code: string; message: string }
+/** One question of a pending question request, as the person sees it. */
+export interface PendingQuestionItem {
+  header: string
+  question: string
+  options: Array<{ label: string; description: string }>
+  multiple: boolean
+  /** Whether a free-text answer is accepted besides the options. */
+  custom: boolean
+}
+/** What a session waits on the person for. Text only: never follow links or run commands from it. */
+export type Pending =
+  | { kind: "question"; requestId: string; questions: PendingQuestionItem[] }
+  | { kind: "permission"; requestId: string; title: string; detail: string; command?: string }
 export interface Command {
   commandId: string
   kind: "remote_session_create"
@@ -26,6 +39,8 @@ export interface Progress {
   messageCount?: number
   /** The step the session ran last, as a short sentence (≤240 chars); omitted by older runners. */
   latestStep?: string | null
+  /** Present only while waiting, from adapters that can read the native request. */
+  pending?: Pending | null
   observedAt: number
 }
 export type Complete =
@@ -34,6 +49,10 @@ export type Complete =
 export interface ReadInput { from: "start" | "end"; cursor: string | null; limit: number }
 export interface SendInput { prompt: string; messageId: string | null; model: Model | null }
 export interface StopInput { messageId: string | null }
+/** The person's own answer. A remote surface never sends "always": every permission is approved once. */
+export type AnswerInput =
+  | { kind: "question"; requestId: string; answers: string[][] }
+  | { kind: "permission"; requestId: string; decision: "once" | "reject" }
 interface RequestBase {
   requestId: string
   kind: "remote_session_request"
@@ -47,6 +66,7 @@ export type Request = RequestBase & (
   | { action: "read"; input: ReadInput }
   | { action: "send"; input: SendInput }
   | { action: "stop"; input: StopInput }
+  | { action: "answer"; input: AnswerInput }
 )
 export interface TranscriptToolCall {
   id: string; name: string; status: string | null
@@ -88,13 +108,18 @@ export interface ReadResult {
   nextCursor: string | null
   /** Native context may omit history removed by compaction; this is not a session error. */
   historyScope?: "context" | "full"
+  /** The question or permission the session waits on, when the adapter can read it. */
+  pending?: Pending | null
 }
 export interface SendResult { messageId: string | null; alreadyPresent: boolean }
 export interface StopResult { stopped: boolean; reason: "different_turn" | null }
+/** alreadyAnswered: the request was no longer pending when an earlier attempt of this answer was replayed. */
+export interface AnswerResult { requestId: string; alreadyAnswered: boolean }
 export type RequestOutcome =
   | { action: "read"; result: ReadResult }
   | { action: "send"; result: SendResult }
   | { action: "stop"; result: StopResult }
+  | { action: "answer"; result: AnswerResult }
 export type RequestComplete =
   | { status: "done"; outcome: RequestOutcome }
   | { status: "failed"; error: SessionError }
@@ -121,6 +146,12 @@ export interface HarnessAdapter {
   /** Must compare input.messageId to the native current turn before aborting it. */
   stop(receipt: Receipt, input: StopInput, signal: AbortSignal): Promise<StopResult>
   observe(receipt: Receipt, signal: AbortSignal): Promise<Progress>
+  /**
+   * Reply to the session's pending question or permission through the native path.
+   * Must validate the answer against the live request and throw SessionRunnerError
+   * "stale_request" when input.requestId is no longer pending. Absent: unsupported.
+   */
+  answer?(receipt: Receipt, input: AnswerInput, signal: AbortSignal): Promise<void>
 }
 export interface Transport {
   complete(commandId: string, body: Complete, signal: AbortSignal): Promise<void>
@@ -156,7 +187,7 @@ export interface CommandEntry {
 export interface RequestEntry {
   request: Request
   sendReplay: SendReplayMode
-  /** Send ID or pinned stop guard, fixed before native effects. */
+  /** Send ID, pinned stop guard, or (answer) the pending requestId once the native reply was dispatched. */
   messageId: string | null
   /** Pre-send baseline; applied atomically with success or ambiguity, never on a proven rejection. */
   turn: Turn | null
